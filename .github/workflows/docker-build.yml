@@ -1,0 +1,127 @@
+name: SepetTakip CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOCKER_REGISTRY: docker.io
+  DOCKER_IMAGE_NAME: ${{ github.repository_owner }}/sepettakip
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+jobs:
+  lint-and-test:
+    name: Lint ve Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodu Kontrol Et
+        uses: actions/checkout@v3
+
+      - name: Node.js Kur
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Bağımlılıkları Yükle
+        run: npm ci
+
+      - name: Linter Çalıştır
+        run: npm run lint
+
+      - name: Testleri Çalıştır
+        run: npm test
+
+  build-docker-image:
+    name: Docker Image Build
+    needs: lint-and-test
+    runs-on: ubuntu-latest
+    if: success() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+
+    steps:
+      - name: Kodu Kontrol Et
+        uses: actions/checkout@v3
+
+      - name: Docker Meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.DOCKER_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      - name: Docker Buildx Kur
+        uses: docker/setup-buildx-action@v2
+
+      - name: Docker Registry'e Giriş Yap
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_PASSWORD }}
+        if: github.event_name != 'pull_request'
+
+      - name: Docker Image Build ve Push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-to-staging:
+    name: Staging Ortamına Deploy
+    needs: build-docker-image
+    runs-on: ubuntu-latest
+    if: success() && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Staging Sunucusuna Bağlan ve Deploy Et
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USERNAME }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /home/${{ secrets.STAGING_USERNAME }}/sepettakip
+            docker-compose pull
+            docker-compose up -d --profile prod
+            docker image prune -f
+
+      - name: Slack Bildirim Gönder
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_TITLE: 'SepetTakip Staging Deploy'
+          SLACK_MESSAGE: 'SepetTakip uygulaması başarıyla staging ortamına deploy edildi!'
+          SLACK_FOOTER: 'GitHub Actions'
+        if: success()
+
+  health-check:
+    name: Sağlık Kontrolü
+    needs: deploy-to-staging
+    runs-on: ubuntu-latest
+    if: success() && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 10 Saniye Bekle
+        run: sleep 10
+
+      - name: Health Check API Kontrolü
+        uses: jtalk/url-health-check-action@v3
+        with:
+          url: https://${{ secrets.STAGING_DOMAIN }}/api/health
+          max-attempts: 5
+          retry-delay: 5s
+          retry-all: true 

@@ -1,0 +1,65 @@
+# Node.js & Next.js dosyaları
+node_modules
+.next
+out
+dist
+
+# Git ve versiyonlama
+.git
+.github
+.gitignore
+
+# Log dosyaları
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ortam değişkenleri ve gizli bilgiler
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.docker
+
+# Geliştirme araçları
+.idea
+.vscode
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Test dosyaları
+coverage
+.nyc_output
+cypress/videos
+cypress/screenshots
+
+# Docker dosyaları (kendi kendini kopyalamasın)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Temp dosyaları
+.temp
+.tmp
+.cache
+
+# Gereksiz dokümantasyon ve yapılandırma dosyaları
+README.md
+LICENSE
+.eslintrc.json
+.eslintignore
+.prettierrc
+.prettierignore
+jest.config.js
+renovate.json
+
+# Derleme önbelleği
+.cache/
+.next/cache/ 

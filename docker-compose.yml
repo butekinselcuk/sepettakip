@@ -1,0 +1,84 @@
+version: '3.8'
+
+# Ağlar
+networks:
+  sepettakip-network:
+    driver: bridge
+
+# Volume'lar
+volumes:
+  postgres-data:
+  node_modules:
+  next-cache:
+
+# Servisler
+services:
+  # PostgreSQL Veritabanı
+  postgres:
+    image: postgres:15-alpine
+    container_name: sepettakip-postgres
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - sepettakip-network
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-sepettakip}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Next.js Uygulaması - Geliştirme
+  app-dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      target: development
+      dockerfile: Dockerfile
+    container_name: sepettakip-app-dev
+    restart: always
+    ports:
+      - "3000:3000"
+    networks:
+      - sepettakip-network
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - next-cache:/app/.next
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sepettakip}
+      - NODE_ENV=development
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-sepettakip_dev_secret}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npm run dev
+
+  # Next.js Uygulaması - Production
+  app-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      target: production
+      dockerfile: Dockerfile
+    container_name: sepettakip-app-prod
+    restart: always
+    ports:
+      - "3000:3000"
+    networks:
+      - sepettakip-network
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sepettakip}
+      - NODE_ENV=production
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - NEXTAUTH_URL=${NEXTAUTH_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy 

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#fff" rx="64" ry="64" />
+  <g transform="translate(90, 90) scale(0.65)">
+    <path fill="url(#gradient)" d="M244 84L8 84c-4.4 0-8 3.6-8 8v36c0 4.4 3.6 8 8 8h236c4.4 0 8-3.6 8-8V92c0-4.4-3.6-8-8-8zm0 192H8c-4.4 0-8 3.6-8 8v36c0 4.4 3.6 8 8 8h236c4.4 0 8-3.6 8-8v-36c0-4.4-3.6-8-8-8zm496-136c0 8.8-7.2 16-16 16H376c-8.8 0-16-7.2-16-16v-16c0-8.8 7.2-16 16-16h348c8.8 0 16 7.2 16 16v16zm0 192c0 8.8-7.2 16-16 16H376c-8.8 0-16-7.2-16-16v-16c0-8.8 7.2-16 16-16h348c8.8 0 16 7.2 16 16v16zm0-96c0 8.8-7.2 16-16 16H376c-8.8 0-16-7.2-16-16v-16c0-8.8 7.2-16 16-16h348c8.8 0 16 7.2 16 16v16z" />
+    <path fill="url(#gradient)" d="M416 208H272c-8.8 0-16 7.2-16 16v32c0 8.8 7.2 16 16 16h144c8.8 0 16-7.2 16-16v-32c0-8.8-7.2-16-16-16zm0-128H272c-8.8 0-16 7.2-16 16v32c0 8.8 7.2 16 16 16h144c8.8 0 16-7.2 16-16V96c0-8.8-7.2-16-16-16z" />
+    <path fill="url(#gradient)" d="M480 320H32c-17.7 0-32 14.3-32 32v128c0 17.7 14.3 32 32 32h448c17.7 0 32-14.3 32-32V352c0-17.7-14.3-32-32-32zm-16 160H48v-64h416v64z" />
+  </g>
+  <circle cx="256" cy="256" r="120" fill="none" stroke="url(#gradient)" stroke-width="24" />
+  <path d="M256 176v80l60 60" stroke="url(#gradient)" fill="none" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" />
+</svg> 
