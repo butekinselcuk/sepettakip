@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: sepettakip-staging-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sepettakip}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-staging_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sepettakip_staging}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-staging-data:/var/lib/postgresql/data
+      - ./scripts/staging-migrations.sql:/docker-entrypoint-initdb.d/01-migrations.sql
+      - ./scripts/staging-seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    ports:
+      - "5433:5432"
+    networks:
+      - sepettakip-staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sepettakip -d sepettakip_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.staging
+    container_name: sepettakip-staging-api
+    restart: always
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgresql://sepettakip:staging_password@db:5432/sepettakip_staging
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-staging_secret_key}
+    ports:
+      - "3010:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - sepettakip-staging-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: sepettakip-staging-nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/staging.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - api
+    networks:
+      - sepettakip-staging-network
+
+volumes:
+  postgres-staging-data:
+    driver: local
+
+networks:
+  sepettakip-staging-network:
+    driver: bridge 

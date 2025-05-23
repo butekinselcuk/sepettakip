@@ -7,6 +7,21 @@ type ReportType = 'ORDERS' | 'DELIVERIES' | 'REVENUE' | 'USERS';
 type ReportFormat = 'PDF' | 'CSV' | 'EXCEL';
 type ReportFrequency = 'DAILY' | 'WEEKLY' | 'MONTHLY';
 
+interface ReportSchedule {
+  type: ReportType;
+  frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+  time: string;
+  recipients: string[];
+  format: 'PDF' | 'EXCEL' | 'CSV';
+  filters?: Record<string, unknown>;
+}
+
+interface CreateReportPageProps {
+  params: {
+    type?: ReportType;
+  };
+}
+
 export default function CreateScheduledReportPage() {
   const router = useRouter();
   const [title, setTitle] = useState('');
@@ -82,8 +97,12 @@ export default function CreateScheduledReportPage() {
         router.push('/business/reports');
       }, 2000);
       
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Beklenmeyen bir hata oluştu');
+      }
     } finally {
       setLoading(false);
     }

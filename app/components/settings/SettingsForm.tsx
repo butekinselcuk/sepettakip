@@ -4,29 +4,50 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 
+interface SettingsData {
+  id: string;
+  name: string;
+  value: string | number | boolean;
+  type: 'string' | 'number' | 'boolean';
+  description?: string;
+}
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  settings?: SettingsState;
+}
+
 interface SettingsFormProps {
-  onUpdate?: (data: any) => void;
+  onUpdate?: (data: SettingsData) => void;
+}
+
+interface SettingsState {
+  notifications: {
+    email: boolean;
+    push: boolean;
+    sms: boolean;
+  };
+  preferences: {
+    language: string;
+    darkMode: boolean;
+    newsletter: boolean;
+  };
+  privacy: {
+    shareData: boolean;
+    locationTracking: boolean;
+  };
 }
 
 export default function SettingsForm({ onUpdate }: SettingsFormProps) {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [formData, setFormData] = useState({
-    notifications: {
-      email: true,
-      push: true,
-      sms: false,
-    },
-    preferences: {
-      language: 'tr',
-      darkMode: false,
-      newsletter: true,
-    },
-    privacy: {
-      shareData: false,
-      locationTracking: true,
-    }
+  const [formData, setFormData] = useState<SettingsState>({
+    notifications: { email: false, push: false, sms: false },
+    preferences: { language: 'tr', darkMode: false, newsletter: false },
+    privacy: { shareData: false, locationTracking: false },
   });
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
@@ -66,24 +87,23 @@ export default function SettingsForm({ onUpdate }: SettingsFormProps) {
     fetchUserSettings();
   }, [router]);
 
-  const handleCheckboxChange = (category: string, setting: string) => {
+  const handleCheckboxChange = (category: keyof SettingsState, setting: string) => {
     setFormData(prev => ({
       ...prev,
       [category]: {
-        ...prev[category as keyof typeof prev],
-        [setting]: !prev[category as keyof typeof prev][setting as any]
+        ...prev[category],
+        [setting]: !prev[category][setting as keyof typeof prev[typeof category]]
       }
     }));
   };
 
   const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = e.target;
-    const [category, setting] = name.split('.');
-    
+    const [category, setting] = name.split('.') as [keyof SettingsState, string];
     setFormData(prev => ({
       ...prev,
       [category]: {
-        ...prev[category as keyof typeof prev],
+        ...prev[category],
         [setting]: value
       }
     }));

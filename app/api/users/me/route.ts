@@ -1,25 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { verifyJwtToken } from "@/lib/auth";
+import { verifyJwtToken, getTokenData } from "@/lib/auth";
 
 // GET /api/users/me - Giriş yapmış kullanıcının bilgilerini getirir
 export async function GET(request: NextRequest) {
   try {
-    // JWT kontrolü
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // JWT kontrolü - authorization header veya cookie'den token al
+    let tokenPayload = await getTokenData(request);
+    
+    if (!tokenPayload) {
+      // Alternatif olarak manuel token kontrolü
+      const authHeader = request.headers.get("authorization");
+      const token = authHeader?.startsWith("Bearer ") 
+        ? authHeader.substring(7) 
+        : request.cookies.get('token')?.value;
+      
+      if (token) {
+        tokenPayload = await verifyJwtToken(token);
+      }
     }
 
-    const decoded = await verifyJwtToken(token);
-    if (!decoded) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!tokenPayload) {
+      return NextResponse.json({ error: "Yetkisiz erişim", message: "Token bulunamadı" }, { status: 401 });
+    }
+
+    // userId değerini al (token formatında userId veya id olabilir)
+    const userId = tokenPayload.userId || tokenPayload.id;
+    
+    if (!userId) {
+      return NextResponse.json({ error: "Geçersiz token", message: "Token içinde kullanıcı ID'si bulunamadı" }, { status: 401 });
     }
 
     // Kullanıcı bilgilerini getir
     const user = await prisma.user.findUnique({
       where: {
-        id: decoded.id
+        id: userId
       },
       select: {
         id: true,
@@ -28,23 +43,23 @@ export async function GET(request: NextRequest) {
         role: true,
         createdAt: true,
         updatedAt: true,
-        admin: decoded.role === "ADMIN",
-        business: decoded.role === "BUSINESS",
-        courier: decoded.role === "COURIER",
-        customer: decoded.role === "CUSTOMER"
+        admin: tokenPayload.role === "ADMIN",
+        business: tokenPayload.role === "BUSINESS",
+        courier: tokenPayload.role === "COURIER",
+        customer: tokenPayload.role === "CUSTOMER"
       }
     });
 
     if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json({ error: "Kullanıcı bulunamadı", message: `ID: ${userId} ile kullanıcı bulunamadı` }, { status: 404 });
     }
 
     // Şifreyi kesinlikle gönderme
     return NextResponse.json({ user });
   } catch (error) {
-    console.error("Error fetching user:", error);
+    console.error("Kullanıcı bilgileri alınırken hata:", error);
     return NextResponse.json(
-      { error: "Internal Server Error" },
+      { error: "Sunucu hatası", message: error instanceof Error ? error.message : "Bilinmeyen hata" },
       { status: 500 }
     );
   }

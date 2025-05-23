@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import jwt from 'jsonwebtoken';
-
-const prisma = new PrismaClient();
-
-// Token doğrulama fonksiyonu
-const verifyToken = (token: string): Promise<any> => {
-  return new Promise((resolve, reject) => {
-    jwt.verify(token, process.env.JWT_SECRET || 'default-secret-key', (err, decoded) => {
-      if (err) return resolve(null);
-      resolve(decoded);
-    });
-  });
-};
+import { verifyJwtToken } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(request: NextRequest) {
   try {
-    // Token doğrulama
-    const token = request.headers.get('authorization')?.split(' ')[1];
+    // Token doğrulama - Headers veya cookie'den token al
+    const token = request.headers.get('authorization')?.split(' ')[1] || 
+                  request.cookies.get('token')?.value;
     
     if (!token) {
       return NextResponse.json(
@@ -26,7 +15,7 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    const decodedToken = await verifyToken(token);
+    const decodedToken = await verifyJwtToken(token);
     
     if (!decodedToken || !decodedToken.userId) {
       return NextResponse.json(
@@ -132,19 +121,16 @@ export async function GET(request: NextRequest) {
     });
     
     // Popüler ürünleri getir
-    // Not: Bu örnekte sadece sipariş sayısı dikkate alınıyor, gerçek uygulamada
-    // işletmenin menü öğelerini ve popüler ürünlerini belirlemek için daha karmaşık
-    // bir sorgu kullanılabilir.
     const business = await prisma.business.findUnique({
       where: { id: businessId },
       include: {
-        menuItems: {
+        products: {
           where: {
-            isAvailable: true
+            isActive: true
           },
           take: 5,
           orderBy: {
-            price: 'desc' // Geçici olarak en pahalı ürünleri listeliyoruz
+            price: 'desc' 
           }
         }
       }
@@ -160,8 +146,8 @@ export async function GET(request: NextRequest) {
         week: `${weekRevenue._sum.totalPrice || 0} TL`,
         month: `${monthRevenue._sum.totalPrice || 0} TL`
       },
-      popularItems: business?.menuItems || [],
-      businessRating: business?.rating || 0
+      popularItems: business?.products || [],
+      businessName: business?.name || ''
     };
     
     return NextResponse.json(stats);

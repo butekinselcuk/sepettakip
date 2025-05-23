@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { Status } from '@prisma/client';
+import { 
+  handleDatabaseError, 
+  handleServerError,
+  createEmptyResponse
+} from '@/lib/api-utils';
 
 export async function GET(request: Request) {
   try {
@@ -67,93 +71,113 @@ export async function GET(request: Request) {
       whereConditions.isLate = true;
     }
     
-    // Kuryeler için filtreleme
-    const couriers = courierFilter && courierFilter !== 'all'
-      ? await prisma.courier.findMany({ where: { id: courierFilter } })
-      : await prisma.courier.findMany();
-    
-    // Her kurye için performans metriklerini hesapla
-    const courierPerformanceData = await Promise.all(
-      couriers.map(async (courier) => {
-        // Kurye için toplam teslimat sayısı
-        const totalDeliveries = await prisma.delivery.count({
-          where: {
-            ...whereConditions,
-            courierId: courier.id
-          }
-        });
-        
-        // Tamamlanan teslimatlar
-        const completedDeliveries = await prisma.delivery.count({
-          where: {
-            ...whereConditions,
-            courierId: courier.id,
-            status: 'COMPLETED'
-          }
-        });
-        
-        // Başarı oranı
-        const successRate = totalDeliveries > 0 
-          ? Math.round((completedDeliveries / totalDeliveries) * 100) 
-          : 0;
-        
-        // Ortalama teslimat süresi (dakika olarak)
-        const deliveries = await prisma.delivery.findMany({
-          where: {
-            ...whereConditions,
-            courierId: courier.id,
-            status: 'COMPLETED'
-          },
-          select: {
-            deliveryTime: true
-          }
-        });
-        
-        const totalDeliveryTime = deliveries.reduce((acc, delivery) => acc + (delivery.deliveryTime || 0), 0);
-        const avgDeliveryTime = deliveries.length > 0 
-          ? Math.round(totalDeliveryTime / deliveries.length) 
-          : 0;
-        
-        // Kurye puanı (5 üzerinden) - müşteri derecelendirmelerinden hesaplanır
-        const ratings = await prisma.delivery.findMany({
-          where: {
-            courierId: courier.id,
-            customerRating: {
-              not: null
+    try {
+      // Kuryeler için filtreleme
+      const couriers = courierFilter && courierFilter !== 'all'
+        ? await prisma.courier.findMany({ 
+            where: { id: courierFilter },
+            include: { user: true }
+          })
+        : await prisma.courier.findMany({
+            include: { user: true }
+          });
+      
+      // Kurye yoksa boş sonuç döndür
+      if (!couriers || couriers.length === 0) {
+        return createEmptyResponse('kurye');
+      }
+      
+      // Her kurye için performans metriklerini hesapla
+      const courierPerformanceData = await Promise.all(
+        couriers.map(async (courier) => {
+          // Kurye için toplam teslimat sayısı
+          const totalDeliveries = await prisma.delivery.count({
+            where: {
+              ...whereConditions,
+              courierId: courier.id
             }
-          },
-          select: {
-            customerRating: true
+          });
+          
+          // Tamamlanan teslimatlar
+          const completedDeliveries = await prisma.delivery.count({
+            where: {
+              ...whereConditions,
+              courierId: courier.id,
+              status: 'COMPLETED'
+            }
+          });
+          
+          // Başarı oranı
+          const successRate = totalDeliveries > 0 
+            ? Math.round((completedDeliveries / totalDeliveries) * 100) 
+            : 0;
+          
+          // Gerçek teslimat süresini ve puanı hesapla
+          let avgDeliveryTime = 0;
+          let rating = 0;
+          
+          try {
+            // Teslimat süresi 
+            const deliveryTimes = await prisma.delivery.findMany({
+              where: {
+                courierId: courier.id,
+                status: 'COMPLETED'
+              },
+              select: {
+                assignedAt: true,
+                pickedUpAt: true,
+                deliveredAt: true
+              }
+            });
+            
+            // Süre hesaplama - atama ile teslimat arasındaki süre
+            if (deliveryTimes.length > 0) {
+              const totalMinutes = deliveryTimes.reduce((total, delivery) => {
+                if (delivery.assignedAt && delivery.deliveredAt) {
+                  const minutes = Math.floor(
+                    (delivery.deliveredAt.getTime() - delivery.assignedAt.getTime()) / (1000 * 60)
+                  );
+                  return total + minutes;
+                }
+                return total;
+              }, 0);
+              
+              avgDeliveryTime = Math.round(totalMinutes / deliveryTimes.length);
+            }
+            
+            // Kurye değerlendirmeleri - kurye modelindeki ratings değerini kullan
+            rating = courier.ratings || 0;
+          } catch (err) {
+            // İlgili tablolar henüz yoksa varsayılan değerler kullan
+            console.warn("Couldn't fetch delivery times:", err);
+            avgDeliveryTime = 0;
+            rating = 0;
           }
-        });
-        
-        let rating = 0;
-        if (ratings.length > 0) {
-          const totalRating = ratings.reduce((acc, delivery) => acc + (delivery.customerRating || 0), 0);
-          rating = totalRating / ratings.length;
-        } else {
-          // Değerlendirme yoksa varsayılan değer
-          rating = 3.5;
-        }
-        
-        return {
-          id: courier.id,
-          name: `Kurye ${courier.id.slice(-3)}`, // Kuryenin ID'sine göre isim oluştur
-          totalDeliveries,
-          completedDeliveries,
-          successRate,
-          avgDeliveryTime,
-          rating
-        };
-      })
-    );
-    
-    // Sadece teslimatı olan kuryeleri göster ve sonuçları döndür
-    const filteredData = courierPerformanceData.filter(item => item.totalDeliveries > 0);
-    
-    return NextResponse.json(filteredData);
+          
+          return {
+            id: courier.id,
+            name: courier.user?.name || `Kurye ${courier.id.slice(-3)}`,
+            totalDeliveries,
+            completedDeliveries,
+            successRate,
+            avgDeliveryTime,
+            rating: typeof rating === 'number' ? parseFloat(rating.toFixed(1)) : 0
+          };
+        })
+      );
+      
+      // Sadece teslimatı olan kuryeleri göster ve sonuçları döndür
+      const filteredData = courierPerformanceData.filter(item => item.totalDeliveries > 0);
+      
+      if (filteredData.length === 0) {
+        return createEmptyResponse('teslimat kaydı olan kurye');
+      }
+      
+      return NextResponse.json(filteredData);
+    } catch (dbError: any) {
+      return handleDatabaseError(dbError);
+    }
   } catch (error) {
-    console.error('Kurye performansı verileri alınamadı:', error);
-    return NextResponse.json({ error: 'Kurye performansı verileri alınamadı' }, { status: 500 });
+    return handleServerError(error);
   }
 } 

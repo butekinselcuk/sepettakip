@@ -1,0 +1,46 @@
+### Kullanıcı Girişi
+POST http://localhost:3010/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@sepettakip.com",
+  "password": "password123"
+}
+
+### İşletmeleri Listele (Token Değiştirilmeli)
+GET http://localhost:3010/api/businesses
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEiLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE2OTAyMzQ1Njc4OTAsImV4cCI6MTY5MDI0MTc2Nzg5MH0.xYZ_token_placeholder
+
+### Sağlık Kontrolü
+GET http://localhost:3010/health
+
+### Kuryeleri Listele (Token Değiştirilmeli)
+GET http://localhost:3010/api/couriers
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMTExMTExMS0xMTExLTExMTEtMTExMS0xMTExMTExMTExMTEiLCJyb2xlIjoiQURNSU4iLCJpYXQiOjE2OTAyMzQ1Njc4OTAsImV4cCI6MTY5MDI0MTc2Nzg5MH0.xYZ_token_placeholder
+
+### İşletme Kullanıcısı Girişi
+POST http://localhost:3010/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "kebapci@example.com",
+  "password": "password123"
+}
+
+### Müşteri Kullanıcısı Girişi
+POST http://localhost:3010/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "musteri1@example.com",
+  "password": "password123"
+}
+
+### Kurye Kullanıcısı Girişi
+POST http://localhost:3010/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "kurye1@example.com",
+  "password": "password123"
+} 

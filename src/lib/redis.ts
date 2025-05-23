@@ -1,4 +1,5 @@
 import { createClient, RedisClientType } from 'redis'
+import logger from '@/lib/logger'
 
 class RedisService {
   private static instance: RedisService
@@ -11,21 +12,29 @@ class RedisService {
     })
 
     this.client.on('error', (error) => {
-      console.error('Redis bağlantı hatası:', error)
+      logger.error('Redis bağlantı hatası', error as Error, {
+        module: 'redis'
+      })
       this.isConnected = false
     })
 
     this.client.on('connect', () => {
-      console.log('Redis bağlantısı başarılı')
+      logger.info('Redis bağlantısı başarılı', {
+        module: 'redis'
+      })
       this.isConnected = true
     })
 
     this.client.on('reconnecting', () => {
-      console.log('Redis yeniden bağlanıyor...')
+      logger.info('Redis yeniden bağlanıyor...', {
+        module: 'redis'
+      })
     })
 
     this.client.on('end', () => {
-      console.log('Redis bağlantısı sonlandı')
+      logger.info('Redis bağlantısı sonlandı', {
+        module: 'redis'
+      })
       this.isConnected = false
     })
   }

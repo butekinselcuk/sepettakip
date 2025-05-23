@@ -1,101 +1,145 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
-import axios from 'axios';
-import { isAuthenticated, getUser, logout } from '@/lib/auth-utils';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { User } from '@/types';
 
-// User tipi
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-}
-
-// Auth Context tipi
 interface AuthContextType {
   user: User | null;
-  loading: boolean;
-  logout: () => Promise<void>;
+  token: string | null;
+  isLoading: boolean;
+  login: (user: User, token: string, remember: boolean) => void;
+  logout: () => void;
+  isAuthenticated: () => boolean;
 }
 
-// Auth Context oluştur
+// Context oluştur
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  loading: true,
-  logout: async () => {},
+  token: null,
+  isLoading: true,
+  login: () => {},
+  logout: () => {},
+  isAuthenticated: () => false,
 });
 
-// Auth Provider props
-interface AuthProviderProps {
-  children: ReactNode;
-}
+// Auth context hook
+export const useAuth = () => useContext(AuthContext);
 
-// AuthProvider bileşeni
-export function AuthProvider({ children }: AuthProviderProps) {
+// AuthProvider component
+export default function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const router = useRouter();
-  const pathname = usePathname();
+  const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Kullanıcı bilgisini yükle
+  // Kullanıcı bilgilerini localStorage/sessionStorage'dan al
   useEffect(() => {
-    const checkAuth = async () => {
-      // Kullanıcı giriş yapmış mı?
-      if (isAuthenticated()) {
-        try {
-          // localStorage'dan kullanıcı bilgisini al
-          const userData = getUser();
-          if (userData) {
-            setUser(userData as User);
-          } else {
-            // API'den kullanıcı bilgisini al
-            const token = localStorage.getItem('token');
-            const response = await axios.get('/api/auth/me', {
-              headers: {
-                'Authorization': `Bearer ${token}`
-              }
-            });
-            setUser(response.data.user);
-          }
-        } catch (error) {
-          console.error('Kullanıcı bilgisi alınamadı:', error);
-          // Hata durumunda oturumu kapat
-          handleLogout();
+    const loadUserData = () => {
+      try {
+        setIsLoading(true);
+        
+        // Token kontrolü
+        let savedToken = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (!savedToken) {
+          setIsLoading(false);
+          return;
         }
+        
+        // Kullanıcı bilgilerini al
+        let userData: User | null = null;
+        const localUser = localStorage.getItem('user');
+        const sessionUser = sessionStorage.getItem('user');
+        
+        if (localUser) {
+          userData = JSON.parse(localUser);
+        } else if (sessionUser) {
+          userData = JSON.parse(sessionUser);
+        }
+        
+        if (userData && savedToken) {
+          setUser(userData);
+          setToken(savedToken);
+        }
+      } catch (error) {
+        console.error('Kullanıcı bilgileri yüklenirken hata:', error);
+        // Hata durumunda tüm depolanan verileri temizle
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+        sessionStorage.removeItem('user');
+        sessionStorage.removeItem('token');
+      } finally {
+        setIsLoading(false);
       }
-      
-      setLoading(false);
     };
-
-    checkAuth();
+    
+    loadUserData();
+    
+    // Sayfa yüklendiğinde çalışsın
+    window.addEventListener('storage', loadUserData);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('storage', loadUserData);
+    };
   }, []);
 
-  // Kullanıcı oturumunu sonlandır
-  const handleLogout = async () => {
-    try {
-      await axios.post('/api/auth/logout');
-    } catch (error) {
-      console.error('Çıkış yapılırken hata:', error);
-    } finally {
-      // Client-side oturumu temizle
-      logout();
-      setUser(null);
-      
-      // Login sayfasına yönlendir
-      if (pathname && !pathname.startsWith('/auth/')) {
-        router.push('/auth/login');
-      }
+  // Giriş işlemi
+  const login = (userData: User, newToken: string, remember: boolean) => {
+    setUser(userData);
+    setToken(newToken);
+    
+    // Remember me seçeneğine göre localStorage veya sessionStorage kullan
+    if (remember) {
+      localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.setItem('token', newToken);
+      // Tutarlılık için sessionStorage'a da kaydet
+      sessionStorage.setItem('user', JSON.stringify(userData));
+      sessionStorage.setItem('token', newToken);
+    } else {
+      sessionStorage.setItem('user', JSON.stringify(userData));
+      sessionStorage.setItem('token', newToken);
+      // Remember me seçilmediyse localStorage'daki verileri temizle
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
     }
   };
 
+  // Çıkış işlemi
+  const logout = async () => {
+    try {
+      // API'ya çıkış isteği gönder
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+    } catch (error) {
+      console.error('Çıkış yapma API hatası:', error);
+    } finally {
+      // Yerel durumu temizle
+    setUser(null);
+    setToken(null);
+    
+      // Tarayıcı depolamasını temizle
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    sessionStorage.removeItem('user');
+    sessionStorage.removeItem('token');
+      
+      // Sayfa yenileme ile ana sayfaya yönlendir
+      window.location.href = '/';
+    }
+  };
+  
+  // Kimlik doğrulama durumu kontrolü
+  const isAuthenticated = () => {
+    return !!token && !!user;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, logout: handleLogout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, logout, isAuthenticated }}>
       {children}
     </AuthContext.Provider>
   );
-}
-
-// Auth Context için custom hook
-export const useAuth = () => useContext(AuthContext); 
+} 

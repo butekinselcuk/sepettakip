@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
+import Link from 'next/link';
+import { useToast } from '@/app/components/ui/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from 'react-hot-toast';
 
 interface Order {
   id: string;
@@ -33,41 +33,74 @@ interface Order {
 
 export default function OrdersPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [itemsPerPage] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
 
-  const fetchOrders = async (page = 1) => {
+  const fetchOrders = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
+      setError("");
       
-      let url = `/api/orders?page=${page}&limit=${itemsPerPage}`;
+      // localStorage'dan token'ı al
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+      
+      if (!token) {
+        toast({
+          title: 'Hata',
+          description: 'Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.',
+          type: 'error'
+        } as any);
+        router.push('/auth/login');
+        return;
+      }
+      
+      let url = `/api/orders?page=${currentPage}&limit=${itemsPerPage}`;
       if (statusFilter && statusFilter !== 'ALL') url += `&status=${statusFilter}`;
       if (searchTerm) url += `&search=${encodeURIComponent(searchTerm)}`;
       
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
       
-      setOrders(response.data.orders || []);
-      setTotalPages(response.data.totalPages || 1);
-      setCurrentPage(page);
-    } catch (error: any) {
-      console.error('Siparişler yüklenirken hata:', error);
-      toast.error(error.response?.data?.message || 'Siparişler yüklenemedi');
+      if (!response.ok) {
+        if (response.status === 401) {
+          toast({
+            title: 'Hata',
+            description: 'Oturum süresi dolmuş olabilir. Lütfen tekrar giriş yapın.',
+            type: 'error'
+          } as any);
+          router.push('/auth/login');
+          return;
+        }
+        throw new Error('Siparişler yüklenirken bir hata oluştu');
+      }
+      
+      const data = await response.json();
+      setOrders(data.orders);
+      setTotalItems(data.pagination.totalItems);
+      setTotalPages(data.pagination.totalPages);
+      setCurrentPage(data.pagination.currentPage);
+    } catch (err) {
+      console.error('Siparişler yüklenirken hata:', err);
+      setError('Siparişler yüklenirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchOrders(1);
-  }, [statusFilter, searchTerm]);
+    fetchOrders();
+  }, [currentPage]);
 
   const handleStatusChange = (status: string) => {
     setStatusFilter(status);
@@ -79,7 +112,8 @@ export default function OrdersPage() {
 
   const handlePageChange = (page: number) => {
     if (page < 1 || page > totalPages) return;
-    fetchOrders(page);
+    setCurrentPage(page);
+    fetchOrders();
   };
 
   const handleViewDetails = (orderId: string) => {
@@ -159,13 +193,17 @@ export default function OrdersPage() {
         <CardHeader>
           <CardTitle>Siparişler</CardTitle>
           <CardDescription>
-            Toplam {orders.length} sipariş gösteriliyor (Sayfa {currentPage}/{totalPages})
+            Toplam {totalItems} sipariş gösteriliyor (Sayfa {currentPage}/{totalPages})
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
             <div className="flex justify-center py-8">
               <p>Siparişler yükleniyor...</p>
+            </div>
+          ) : error ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">{error}</p>
             </div>
           ) : orders.length === 0 ? (
             <div className="text-center py-8">

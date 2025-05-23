@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import ProfileForm from '@/components/profile/ProfileForm';
+import AddressList from '@/components/profile/AddressList';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function CustomerProfilePage() {
   const [isClient, setIsClient] = useState(false);
@@ -15,7 +17,7 @@ export default function CustomerProfilePage() {
     // Auth kontrolü
     const token = localStorage.getItem("token");
     if (!token) {
-      console.log("Token bulunamadı, login sayfasına yönlendiriliyor");
+      console.error("Token bulunamadı, login sayfasına yönlendiriliyor");
       router.push("/auth/login");
       return;
     }
@@ -24,19 +26,17 @@ export default function CustomerProfilePage() {
     try {
       const storedUser = localStorage.getItem("user");
       if (!storedUser) {
-        console.log("Kullanıcı bilgisi bulunamadı, login sayfasına yönlendiriliyor");
+        console.error("Kullanıcı bilgisi bulunamadı, login sayfasına yönlendiriliyor");
         router.push("/auth/login");
         return;
       }
       
       const userData = JSON.parse(storedUser);
       if (userData.role !== "CUSTOMER") {
-        console.log("Kullanıcı rolü CUSTOMER değil, login sayfasına yönlendiriliyor");
+        console.error("Kullanıcı rolü CUSTOMER değil, login sayfasına yönlendiriliyor");
         router.push("/auth/login");
         return;
       }
-
-      console.log("CUSTOMER kullanıcısı doğrulandı:", userData.email);
     } catch (error) {
       console.error("Kullanıcı bilgisi işlenirken hata:", error);
       router.push("/auth/login");
@@ -67,12 +67,25 @@ export default function CustomerProfilePage() {
           </div>
         </div>
         
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="p-6">
-            <h2 className="text-lg font-medium text-gray-900 mb-4">Kişisel Bilgiler</h2>
-            <ProfileForm onUpdate={handleProfileUpdate} />
-          </div>
-        </div>
+        <Tabs defaultValue="profile" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-8">
+            <TabsTrigger value="profile">Profil Bilgileri</TabsTrigger>
+            <TabsTrigger value="addresses">Adres Bilgilerim</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="profile" className="space-y-4">
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="p-6">
+                <h2 className="text-lg font-medium text-gray-900 mb-4">Kişisel Bilgiler</h2>
+                <ProfileForm onUpdate={handleProfileUpdate} />
+              </div>
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="addresses" className="space-y-4">
+            <AddressList />
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   );

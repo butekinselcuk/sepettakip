@@ -18,8 +18,8 @@ export default function CustomerDashboard() {
   useEffect(() => {
     setIsClient(true);
     
-    // Auth kontrolü
-    const token = localStorage.getItem("token");
+    // Auth kontrolü - cookie ve localStorage iki kaynaktan da kontrol et
+    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
     if (!token) {
       console.log("Token bulunamadı, login sayfasına yönlendiriliyor");
       router.push("/auth/login");
@@ -28,21 +28,21 @@ export default function CustomerDashboard() {
     
     // Kullanıcı bilgilerini kontrol et
     try {
+      // localStorage'dan veya JWT'den kullanıcı bilgisini al
       const storedUser = localStorage.getItem("user");
-      if (!storedUser) {
-        console.log("Kullanıcı bilgisi bulunamadı, login sayfasına yönlendiriliyor");
-        router.push("/auth/login");
+      if (storedUser) {
+        const userData = JSON.parse(storedUser);
+        if (userData.role !== "CUSTOMER") {
+          console.log("Kullanıcı rolü CUSTOMER değil, login sayfasına yönlendiriliyor");
+          router.push("/auth/login");
+          return;
+        }
+        console.log("CUSTOMER kullanıcısı doğrulandı:", userData.email);
+      } else {
+        // Kullanıcı bilgisi bulunamadı, API ile kontrol et
+        checkUserRole();
         return;
       }
-      
-      const userData = JSON.parse(storedUser);
-      if (userData.role !== "CUSTOMER") {
-        console.log("Kullanıcı rolü CUSTOMER değil, login sayfasına yönlendiriliyor");
-        router.push("/auth/login");
-        return;
-      }
-
-      console.log("CUSTOMER kullanıcısı doğrulandı:", userData.email);
       
       // Sipariş ve işletme bilgilerini getir
       fetchOrders();
@@ -53,10 +53,39 @@ export default function CustomerDashboard() {
     }
   }, [router]);
 
+  // Kullanıcı rolünü API'den kontrol et
+  const checkUserRole = async () => {
+    try {
+      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+      
+      const response = await axios.get("/api/users/me", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      if (response.data && response.data.role === "CUSTOMER") {
+        console.log("API'den CUSTOMER kullanıcısı doğrulandı:", response.data.email);
+        // Kullanıcı bilgilerini localStorage'a kaydet
+        localStorage.setItem("user", JSON.stringify(response.data));
+        
+        // Sipariş ve işletme bilgilerini getir
+        fetchOrders();
+        fetchNearbyBusinesses();
+      } else {
+        console.log("Kullanıcı rolü CUSTOMER değil, login sayfasına yönlendiriliyor");
+        router.push("/auth/login");
+      }
+    } catch (error) {
+      console.error("Kullanıcı rolü kontrol edilirken hata:", error);
+      router.push("/auth/login");
+    }
+  };
+
   // Sipariş bilgilerini getir
   const fetchOrders = async () => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
       
       const response = await axios.get("/api/customer/orders", {
         headers: {
@@ -93,7 +122,7 @@ export default function CustomerDashboard() {
   // Yakındaki işletmeleri getir
   const fetchNearbyBusinesses = async () => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
       
       const response = await axios.get("/api/business", {
         headers: {
@@ -115,7 +144,7 @@ export default function CustomerDashboard() {
   // Sipariş iptal
   const cancelOrder = async (orderId: string) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
       const response = await axios.post(`/api/orders/${orderId}/cancel`, {}, {
         headers: {
           "Content-Type": "application/json",

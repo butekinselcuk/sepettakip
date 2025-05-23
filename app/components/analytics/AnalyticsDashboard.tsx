@@ -4,7 +4,7 @@
 // import { Input } from '@/components/ui/input';
 // import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 // import { Label } from '@/components/ui/label';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import CustomizableChart from './CustomizableChart';
 // import RealtimeDashboard from './RealtimeDashboard';
 import dynamic from 'next/dynamic';
@@ -14,80 +14,34 @@ import DeliveryTrendChart, { DeliveryTrendData } from './DeliveryTrendChart';
 import ZonePerformanceBarChart from './ZonePerformanceBarChart';
 import StatCard from './StatCard';
 import CourierPerformance from './CourierPerformance';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { DateRangePicker } from '@/components/ui/date-range-picker';
+import { 
+  AreaChart, 
+  Area, 
+  BarChart, 
+  Bar, 
+  PieChart, 
+  Pie, 
+  Cell, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer 
+} from 'recharts';
 
 const InteractiveMapDynamic = dynamic(() => import('./InteractiveMap'), { ssr: false });
-
-const MOCK_DATA = {
-  deliveryByZone: [
-    { name: 'Kadıköy', value: 120 },
-    { name: 'Üsküdar', value: 98 },
-    { name: 'Beşiktaş', value: 86 },
-    { name: 'Şişli', value: 99 },
-    { name: 'Maltepe', value: 85 }
-  ],
-  deliveryTrend: [
-    { name: 'Pzt', value: 150 },
-    { name: 'Sal', value: 230 },
-    { name: 'Çar', value: 224 },
-    { name: 'Per', value: 218 },
-    { name: 'Cum', value: 335 },
-    { name: 'Cmt', value: 247 },
-    { name: 'Paz', value: 176 }
-  ],
-  courierPerformance: [
-    { name: 'Ahmet', value: 95, deliveries: 45 },
-    { name: 'Mehmet', value: 88, deliveries: 38 },
-    { name: 'Ayşe', value: 92, deliveries: 42 },
-    { name: 'Fatma', value: 85, deliveries: 35 },
-    { name: 'Ali', value: 90, deliveries: 40 }
-  ]
-};
-
-// Mock data for interactive map
-const MOCK_MAP_DATA = {
-  deliveryZones: [
-    {
-      id: '1',
-      name: 'Kadıköy',
-      coordinates: [
-        [40.9900, 29.0200] as [number, number],
-        [40.9900, 29.0400] as [number, number],
-        [41.0100, 29.0400] as [number, number],
-        [41.0100, 29.0200] as [number, number]
-      ],
-      color: '#8884d8'
-    },
-    {
-      id: '2',
-      name: 'Üsküdar',
-      coordinates: [
-        [41.0200, 29.0000] as [number, number],
-        [41.0200, 29.0200] as [number, number],
-        [41.0400, 29.0200] as [number, number],
-        [41.0400, 29.0000] as [number, number]
-      ],
-      color: '#82ca9d'
-    }
-  ],
-  courierLocations: [
-    {
-      id: '1',
-      name: 'Ahmet',
-      position: [41.0000, 29.0300] as [number, number],
-      status: 'active' as const,
-      currentDelivery: {
-        id: '1',
-        address: 'Kadıköy, İstanbul'
-      }
-    },
-    {
-      id: '2',
-      name: 'Mehmet',
-      position: [41.0300, 29.0100] as [number, number],
-      status: 'idle' as const
-    }
-  ]
-};
 
 const timeRanges = [
   { value: 'daily', label: 'Günlük' },
@@ -103,39 +57,109 @@ export default function AnalyticsDashboard() {
   const [endDate, setEndDate] = useState<string>('');
   const [zoneData, setZoneData] = useState<any[]>([]);
   const [zoneLoading, setZoneLoading] = useState(false);
+  const [dataFetched, setDataFetched] = useState(false);
+  const [mapData, setMapData] = useState<any>({
+    deliveryZones: [],
+    courierLocations: []
+  });
 
   useEffect(() => {
+    // Prevent recursive calls and only fetch when needed
+    if (dataFetched) return;
+    
     async function fetchTrends() {
       setLoading(true);
-      const params = new URLSearchParams();
-      params.append('timeRange', timeRange);
-      if (startDate) params.append('startDate', startDate);
-      if (endDate) params.append('endDate', endDate);
-      const res = await fetch(`/api/deliveries/trends?${params.toString()}`);
-      const json = await res.json();
-      const chartData: DeliveryTrendData[] = (json[0]?.hourlyDistribution || []).map((item: any) => ({
-        date: `${item.hour}:00`,
-        totalDeliveries: item.count,
-        completedDeliveries: item.count,
-        averageDeliveryTime: item.averageTime,
-      }));
-      setTrendData(chartData);
-      setLoading(false);
+      try {
+        const params = new URLSearchParams();
+        params.append('timeRange', timeRange);
+        if (startDate) params.append('startDate', startDate);
+        if (endDate) params.append('endDate', endDate);
+        const res = await fetch(`/api/deliveries/trends?${params.toString()}`);
+        const json = await res.json();
+
+        let chartData: DeliveryTrendData[] = [];
+        if (json && Array.isArray(json) && json.length > 0 && 
+            json[0]?.hourlyDistribution && Array.isArray(json[0].hourlyDistribution)) {
+          chartData = json[0].hourlyDistribution.map((item: any) => ({
+            date: `${item.hour || 0}:00`,
+            totalDeliveries: item.count || 0,
+            completedDeliveries: item.count || 0,
+            averageDeliveryTime: item.averageTime || 0,
+          }));
+        }
+        
+        setTrendData(chartData);
+      } catch (error) {
+        console.error("Error fetching trend data:", error);
+        setTrendData([]);
+      } finally {
+        setLoading(false);
+        setDataFetched(true);
+      }
     }
+    
     fetchTrends();
-  }, [timeRange, startDate, endDate]);
+    
+    // Fetch map data
+    fetchMapData();
+  }, [timeRange, startDate, endDate, dataFetched]);
+  
+  // Fetch map data with actual API
+  const fetchMapData = async () => {
+    try {
+      // Fetch delivery zones
+      const zonesRes = await fetch('/api/zones');
+      const zonesData = await zonesRes.json();
+      
+      // Fetch courier locations
+      const couriersRes = await fetch('/api/couriers/locations');
+      const couriersData = await couriersRes.json();
+      
+      setMapData({
+        deliveryZones: Array.isArray(zonesData) ? zonesData.map((zone: any) => ({
+          id: zone.id || '',
+          name: zone.name || '',
+          coordinates: zone.coordinates || [],
+          color: '#' + Math.floor(Math.random()*16777215).toString(16) // Random color
+        })) : [],
+        courierLocations: Array.isArray(couriersData) ? couriersData.map((courier: any) => ({
+          id: courier.id || '',
+          name: courier.name || '',
+          position: courier.position || [41.0, 29.0],
+          status: courier.status || 'idle',
+          currentDelivery: courier.currentDelivery
+        })) : []
+      });
+    } catch (error) {
+      console.error("Error fetching map data:", error);
+      // Set empty data on error
+      setMapData({
+        deliveryZones: [],
+        courierLocations: []
+      });
+    }
+  };
 
   const fetchZonePerformance = async (start?: string, end?: string) => {
     setZoneLoading(true);
-    let url = '/api/zones/performance';
-    const params = [];
-    if (start) params.push(`startDate=${start}`);
-    if (end) params.push(`endDate=${end}`);
-    if (params.length) url += '?' + params.join('&');
-    const res = await fetch(url);
-    const data = await res.json();
-    setZoneData(data);
-    setZoneLoading(false);
+    try {
+      let url = '/api/zones/performance';
+      const params = [];
+      if (start) params.push(`startDate=${start}`);
+      if (end) params.push(`endDate=${end}`);
+      if (params.length) url += '?' + params.join('&');
+      
+      const res = await fetch(url);
+      const data = await res.json();
+      
+      // Ensure data is an array
+      setZoneData(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Error fetching zone performance:", error);
+      setZoneData([]);
+    } finally {
+      setZoneLoading(false);
+    }
   };
 
   const handleGenerateReport = async (type: string, recipients: string[], schedule?: any) => {
@@ -163,12 +187,39 @@ export default function AnalyticsDashboard() {
     }
   };
 
-  // StatCard metriklerini hesapla
-  const totalDeliveries = zoneData.reduce((acc, z) => acc + (z.metrics?.totalDeliveries || 0), 0);
-  const averageSuccessRate = zoneData.length > 0 ? (zoneData.reduce((acc, z) => acc + (z.metrics?.successRate || 0), 0) / zoneData.length) : 0;
-  const averageDeliveryTime = zoneData.length > 0 ? (zoneData.reduce((acc, z) => acc + (z.metrics?.averageDeliveryTime || 0), 0) / zoneData.length) : 0;
+  // Reset data fetched state when filters change
+  useEffect(() => {
+    setDataFetched(false);
+  }, [timeRange, startDate, endDate]);
+
+  // Ensure zoneData is an array
+  const safeZoneData = Array.isArray(zoneData) ? zoneData : [];
+  
+  // StatCard metriklerini hesapla - with safety checks
+  const totalDeliveries = safeZoneData.reduce((acc, z) => {
+    const deliveries = z?.metrics?.totalDeliveries;
+    return acc + (typeof deliveries === 'number' ? deliveries : 0);
+  }, 0);
+    
+  const averageSuccessRate = safeZoneData.length > 0
+    ? (safeZoneData.reduce((acc, z) => {
+        const rate = z?.metrics?.successRate;
+        return acc + (typeof rate === 'number' ? rate : 0);
+      }, 0) / safeZoneData.length)
+    : 0;
+    
+  const averageDeliveryTime = safeZoneData.length > 0
+    ? (safeZoneData.reduce((acc, z) => {
+        const time = z?.metrics?.averageDeliveryTime;
+        return acc + (typeof time === 'number' ? time : 0);
+      }, 0) / safeZoneData.length)
+    : 0;
+    
   // Aktif kurye sayısı için zoneData'da courierDistribution varsa kullan
-  const activeCouriers = zoneData.reduce((acc, z) => acc + (z.courierDistribution ? z.courierDistribution.length : 0), 0);
+  const activeCouriers = safeZoneData.reduce((acc, z) => {
+    const couriers = z?.courierDistribution;
+    return acc + (Array.isArray(couriers) ? couriers.length : 0);
+  }, 0);
 
   return (
     <div className="space-y-4 p-4">
@@ -181,23 +232,40 @@ export default function AnalyticsDashboard() {
       </div>
       {/* <RealtimeDashboard /> */}
       <h2 style={{ marginTop: 48 }}>İnteraktif Harita</h2>
-      <InteractiveMapDynamic deliveryZones={MOCK_MAP_DATA.deliveryZones} courierLocations={MOCK_MAP_DATA.courierLocations} />
+      <InteractiveMapDynamic deliveryZones={mapData.deliveryZones} courierLocations={mapData.courierLocations} />
       <div style={{ marginBottom: 24 }}>
         <label style={{ marginRight: 8 }}>Zaman Aralığı:</label>
-        <select value={timeRange} onChange={e => setTimeRange(e.target.value)}>
+        <select value={timeRange} onChange={e => {
+          setTimeRange(e.target.value);
+          setDataFetched(false);
+        }}>
           {timeRanges.map(opt => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
         <label style={{ margin: '0 8px' }}>Başlangıç:</label>
-        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+        <input 
+          type="date" 
+          value={startDate} 
+          onChange={e => {
+            setStartDate(e.target.value);
+            setDataFetched(false);
+          }} 
+        />
         <label style={{ margin: '0 8px' }}>Bitiş:</label>
-        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+        <input 
+          type="date" 
+          value={endDate} 
+          onChange={e => {
+            setEndDate(e.target.value);
+            setDataFetched(false);
+          }} 
+        />
       </div>
       <DeliveryTrendChart data={trendData} loading={loading} />
       <h2 style={{ marginTop: 48 }}>Bölge Performansları</h2>
       <ZonePerformanceBarChart
-        data={zoneData}
+        data={safeZoneData}
         loading={zoneLoading}
         onDateRangeChange={fetchZonePerformance}
       />

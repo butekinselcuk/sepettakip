@@ -1,0 +1,159 @@
+name: Staging Deployment
+
+on:
+  push:
+    branches: [ staging, main ]
+  workflow_dispatch:
+    inputs:
+      deploy_message:
+        description: 'Deployment message'
+        required: false
+        default: 'Manual staging deployment'
+
+env:
+  STAGING_URL: ${{ secrets.STAGING_URL }}
+  STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+  NODE_ENV: staging
+
+jobs:
+  lint-test-build:
+    name: Lint, Test ve Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu Kontrol Et
+        uses: actions/checkout@v3
+
+      - name: Node.js Kur
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Bağımlılıkları Yükle
+        run: npm ci
+
+      - name: Lint Kontrolleri
+        run: npm run lint
+
+      - name: Type Kontrolü
+        run: npm run type-check
+
+      - name: Unit Testler
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ env.STAGING_DB_URL }}
+          NEXT_PUBLIC_API_URL: ${{ env.STAGING_URL }}
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-artifacts
+          path: |
+            .next/
+            node_modules/
+            package.json
+            next.config.js
+            public/
+
+  database-migration:
+    name: Veritabanı Migrasyonu
+    needs: lint-test-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu Kontrol Et
+        uses: actions/checkout@v3
+
+      - name: Node.js Kur
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Bağımlılıkları Yükle
+        run: npm ci
+
+      - name: Prisma Client Oluştur
+        run: npx prisma generate
+
+      - name: Veritabanı Migrasyonlarını Uygula
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.STAGING_DB_URL }}
+
+  deploy-to-staging:
+    name: Staging Ortamına Deploy
+    needs: [lint-test-build, database-migration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: build-artifacts
+          path: .
+
+      - name: Deploy to Staging
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USERNAME }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            cd /home/${{ secrets.STAGING_USERNAME }}/sepettakip
+            docker-compose pull
+            docker-compose up -d --profile staging
+            docker image prune -f
+
+      - name: Slack Bildirim Gönder
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_CHANNEL: deployments
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_TITLE: 'SepetTakip Staging Deploy'
+          SLACK_MESSAGE: 'SepetTakip başarıyla staging ortamına deploy edildi! 🚀'
+          SLACK_FOOTER: 'GitHub Actions'
+        if: success()
+
+  integration-tests:
+    name: Entegrasyon Testleri
+    needs: deploy-to-staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu Kontrol Et
+        uses: actions/checkout@v3
+
+      - name: Node.js Kur
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Bağımlılıkları Yükle
+        run: npm ci
+
+      - name: 20 Saniye Bekle (Deployment için)
+        run: sleep 20
+
+      - name: Uygulama Sağlık Kontrolü
+        run: |
+          curl --fail ${{ env.STAGING_URL }}/api/health || exit 1
+
+      - name: Cypress Testleri Çalıştır
+        uses: cypress-io/github-action@v5
+        with:
+          browser: chrome
+          config: baseUrl=${{ env.STAGING_URL }}
+        env:
+          CYPRESS_BASE_URL: ${{ env.STAGING_URL }}
+
+      - name: Test Sonuçları ve Ekran Görüntülerini Kaydet
+        uses: actions/upload-artifact@v3
+        with:
+          name: cypress-results
+          path: |
+            cypress/screenshots/
+            cypress/videos/
+        if: always() 

@@ -1,0 +1,189 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies for headless Chrome
+RUN apk add --no-cache \
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    nodejs \
+    yarn \
+    bash \
+    python3 \
+    g++ \
+    make
+
+# Set environment variables for Chrome
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
+
+# Copy package files
+COPY package.json yarn.lock ./
+
+# Install dependencies
+RUN yarn install --frozen-lockfile
+
+# Copy the rest of the project
+COPY . .
+
+# Install Playwright with necessary browsers for testing
+RUN npx playwright install chromium
+RUN npx playwright install-deps chromium
+
+# Create script directory for test utilities
+RUN mkdir -p /app/scripts
+
+# Create update-test-reports.js script
+RUN echo 'const fs = require("fs"); \
+const path = require("path"); \
+\
+// Main function to update reports after tests \
+async function updateReports() { \
+  console.log("Updating test reports..."); \
+  \
+  // Read test results and update reports \
+  const testResults = JSON.parse(fs.readFileSync( \
+    path.join(__dirname, "test-results", "results.json"), \
+    "utf8" \
+  )); \
+  \
+  // Update page test report \
+  updatePageTestReport(testResults); \
+  \
+  // Update lint issues report \
+  updateLintIssuesReport(testResults); \
+  \
+  console.log("Reports updated successfully!"); \
+} \
+\
+// Update page-test-report.md with test results \
+function updatePageTestReport(results) { \
+  const reportPath = path.join(__dirname, "page-test-report.md"); \
+  const report = fs.readFileSync(reportPath, "utf8"); \
+  \
+  // Process results and update report \
+  let updatedReport = report; \
+  \
+  results.forEach(result => { \
+    if (result.page && result.status) { \
+      // Find and update the page entry in the report \
+      const pageRegex = new RegExp(`(\\| ${result.page} \\| )[^|]+(\\| .*\\| .*)`, "g"); \
+      const status = result.status === "pass" ? "✅ Test Edildi" : "❌ Test Başarısız"; \
+      \
+      updatedReport = updatedReport.replace( \
+        pageRegex, \
+        `$1${status}$2` \
+      ); \
+      \
+      // Update description if provided \
+      if (result.description) { \
+        const descRegex = new RegExp(`(\\| ${result.page} \\| [^|]+ \\| )[^|]+(\\| .*)`, "g"); \
+        updatedReport = updatedReport.replace( \
+          descRegex, \
+          `$1${result.description}$2` \
+        ); \
+      } \
+    } \
+  }); \
+  \
+  // Update summary counts \
+  const testedCount = (updatedReport.match(/Test Edildi/g) || []).length; \
+  const failedCount = (updatedReport.match(/Test Başarısız/g) || []).length; \
+  const notImplementedCount = (updatedReport.match(/Henüz Yapılmadı/g) || []).length; \
+  const totalCount = testedCount + failedCount + notImplementedCount; \
+  \
+  updatedReport = updatedReport.replace( \
+    /(Toplam Sayfa Sayısı: )\d+/, \
+    `$1${totalCount}` \
+  ); \
+  \
+  updatedReport = updatedReport.replace( \
+    /(Test Edilen Sayfa Sayısı: )\d+/, \
+    `$1${testedCount}` \
+  ); \
+  \
+  updatedReport = updatedReport.replace( \
+    /(Henüz Yapılmamış Sayfa Sayısı: )\d+/, \
+    `$1${notImplementedCount}` \
+  ); \
+  \
+  // Write updated report \
+  fs.writeFileSync(reportPath, updatedReport); \
+} \
+\
+// Update lint-issues-report.md with lint issues \
+function updateLintIssuesReport(results) { \
+  const reportPath = path.join(__dirname, "lint-issues-report.md"); \
+  const report = fs.readFileSync(reportPath, "utf8"); \
+  \
+  // Process results and update report \
+  let updatedReport = report; \
+  \
+  // Count errors and warnings \
+  let totalErrors = 0; \
+  let totalWarnings = 0; \
+  \
+  results.forEach(result => { \
+    if (result.page && result.lintIssues) { \
+      totalErrors += result.lintIssues.errors || 0; \
+      totalWarnings += result.lintIssues.warnings || 0; \
+      \
+      // Find and update the page entry in the report \
+      const pageRegex = new RegExp(`(\\| ${result.page} \\| )[^|]+(\\| .*)`, "g"); \
+      const status = result.lintIssues.errors > 0 ? "❌ Hatalar Var" : \
+                    (result.lintIssues.warnings > 0 ? "⚠️ Uyarılar Var" : "✅ Temiz"); \
+      \
+      updatedReport = updatedReport.replace( \
+        pageRegex, \
+        `$1${status}$2` \
+      ); \
+      \
+      // Update issues if provided \
+      if (result.lintIssues.details) { \
+        const issuesRegex = new RegExp(`(\\| ${result.page} \\| [^|]+ \\| )[^|]+(\\| .*)`, "g"); \
+        updatedReport = updatedReport.replace( \
+          issuesRegex, \
+          `$1${result.lintIssues.details}$2` \
+        ); \
+      } \
+    } \
+  }); \
+  \
+  // Update summary counts \
+  updatedReport = updatedReport.replace( \
+    /(Toplam Hata Sayısı: )\d+/, \
+    `$1${totalErrors}` \
+  ); \
+  \
+  updatedReport = updatedReport.replace( \
+    /(Toplam Uyarı Sayısı: )\d+/, \
+    `$1${totalWarnings}` \
+  ); \
+  \
+  // Write updated report \
+  fs.writeFileSync(reportPath, updatedReport); \
+} \
+\
+// Run the update process \
+updateReports().catch(err => { \
+  console.error("Error updating reports:", err); \
+  process.exit(1); \
+});' > /app/scripts/update-test-reports.js
+
+# Create a simple test script that runs Playwright tests
+RUN echo '#!/bin/bash \n\
+echo "Running page tests..." \n\
+mkdir -p /app/test-results \n\
+npx playwright test --output=/app/test-results \n\
+node /app/scripts/update-test-reports.js \n\
+echo "Tests complete!"' > /app/scripts/run-tests.sh
+RUN chmod +x /app/scripts/run-tests.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/app/scripts/run-tests.sh"] 

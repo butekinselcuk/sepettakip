@@ -1,12 +1,6 @@
 'use client';
 
-import { Card } from '@/components/ui/card';
 import { 
-  Package, 
-  Clock, 
-  TrendingUp, 
-  Users,
-  DollarSign,
   TruckIcon, 
   ClockIcon, 
   UserIcon, 
@@ -28,25 +22,6 @@ interface SummaryData {
   activeCouriers: number;
   totalIncome: number;
   successRate: number;
-}
-
-function SummaryCard({ title, value, icon, trend }: { title: string; value: string | number; icon: React.ReactNode; trend?: string }) {
-  return (
-    <Card className="p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-500">{title}</p>
-          <p className="text-2xl font-semibold mt-1">{value}</p>
-          {trend && (
-            <p className="text-sm mt-1 text-gray-400">{trend}</p>
-          )}
-        </div>
-        <div className="p-3 bg-primary/10 rounded-full">
-          {icon}
-        </div>
-      </div>
-    </Card>
-  );
 }
 
 export function SummaryCards({ filters, loading = false }: SummaryCardsProps) {

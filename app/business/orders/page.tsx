@@ -8,10 +8,11 @@ import {
   Package, Clock, Calendar, ArrowUpDown, Search, 
   RefreshCw, Filter, CheckCircle, AlertTriangle, XCircle, 
   Truck, Receipt, MoreVertical, MapPin, User, Phone,
-  Map as MapIcon
+  Map as MapIcon, Settings
 } from "lucide-react";
 import RouteMap from "@/app/components/routes/RouteMap";
-import type { RouteData } from "@/app/components/routes/RouteMap";
+import Header from '@/app/components/common/Header';
+import Link from 'next/link';
 
 // Order status types
 type OrderStatus = 
@@ -30,6 +31,17 @@ interface OrderItem {
   quantity: number;
   price: number;
   notes?: string;
+}
+
+// Kurye tipi
+interface Courier {
+  id: string;
+  name: string;
+  phone: string;
+  latitude?: number;
+  longitude?: number;
+  currentLatitude?: number;
+  currentLongitude?: number;
 }
 
 // Order interface
@@ -51,11 +63,7 @@ interface Order {
     phone: string;
     email: string;
   };
-  courier: {
-    id: string;
-    name: string;
-    phone: string;
-  } | null;
+  courier?: Courier;
 }
 
 // Pagination interface
@@ -64,6 +72,37 @@ interface Pagination {
   page: number;
   limit: number;
   pages: number;
+}
+
+// API'den gelecek rota veri tipi
+interface RouteDataCourier {
+  id: string;
+  name: string;
+  phone?: string;
+  currentLatitude?: number;
+  currentLongitude?: number;
+}
+
+// RouteMap bileşeninden gelen arayüzler
+interface RouteDeliveryPoint {
+  id: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  sequenceNumber: number;
+  status: string;
+  customerName: string;
+  estimatedArrival?: string;
+}
+
+// Import edilmemiş RouteData tipini bizim oluşturduğumuz yapıya göre adapte ediyoruz
+interface RouteMapData {
+  courierId: string;
+  courierName: string;
+  deliveryPoints: RouteDeliveryPoint[];
+  totalDistance: number;
+  totalDuration: number;
+  lastUpdated?: string;
 }
 
 export default function BusinessOrders() {
@@ -81,7 +120,7 @@ export default function BusinessOrders() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showOrderDetail, setShowOrderDetail] = useState(false);
   const [showRouteView, setShowRouteView] = useState(false);
-  const [selectedOrderRoute, setSelectedOrderRoute] = useState<RouteData | undefined>(undefined);
+  const [selectedOrderRoute, setSelectedOrderRoute] = useState<RouteMapData | undefined>(undefined);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const router = useRouter();
 
@@ -210,7 +249,16 @@ export default function BusinessOrders() {
       });
 
       if (response.status === 200 && response.data.route) {
-        setSelectedOrderRoute(response.data.route);
+        // API'den gelen veriyi RouteMap'in beklediği formata dönüştür
+        const routeData: RouteMapData = {
+          courierId: response.data.route.courier?.id || '',
+          courierName: response.data.route.courier?.name || '',
+          deliveryPoints: response.data.route.deliveryPoints || [],
+          totalDistance: response.data.route.totalDistance || 0,
+          totalDuration: response.data.route.totalDuration || 0,
+          lastUpdated: new Date().toISOString()
+        };
+        setSelectedOrderRoute(routeData);
       } else {
         console.error("Rota bilgisi alınamadı");
         setSelectedOrderRoute(undefined);
@@ -223,6 +271,19 @@ export default function BusinessOrders() {
     } finally {
       setIsLoadingRoute(false);
     }
+  };
+
+  // Harita görünümünü aç
+  const handleViewRoute = () => {
+    if (!selectedOrder) return;
+    
+    // Eğer rota yüklenmemişse, yükle
+    if (!selectedOrderRoute && selectedOrder.courier) {
+      fetchOrderRoute(selectedOrder.id);
+    }
+    
+    // Harita görünümünü aç
+    setShowRouteView(true);
   };
 
   // Harita görünümünü kapat
@@ -320,10 +381,373 @@ export default function BusinessOrders() {
     }
   };
 
+  // Sipariş detay modalı
+  const OrderDetailModal = () => {
+    if (!selectedOrder) return null;
+
+    return (
+      <div className="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          {/* Header */}
+          <div className="bg-gray-50 p-4 border-b flex justify-between items-center">
+            <h3 className="text-lg font-semibold text-gray-900">
+              Sipariş #{selectedOrder.orderNumber}
+            </h3>
+            <div className="flex items-center space-x-4">
+              {selectedOrder.courier && (
+                <button
+                  onClick={handleViewRoute}
+                  className="flex items-center space-x-2 py-2 px-4 rounded-md bg-blue-500 text-white hover:bg-blue-600 transition-colors"
+                >
+                  <MapIcon size={18} />
+                  <span>Rotayı Görüntüle</span>
+                </button>
+              )}
+              <button
+                onClick={closeOrderDetail}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+          </div>
+
+          {/* Content with scrolling */}
+          <div className="p-4 overflow-y-auto flex-grow">
+            {/* Status Info */}
+            <div className="flex flex-wrap items-center justify-between mb-6 p-3 bg-gray-50 rounded-lg">
+              <div>
+                <span className="font-medium text-gray-500">Durum:</span>
+                <span className="ml-2">{getStatusBadge(selectedOrder.status)}</span>
+              </div>
+              <div>
+                <span className="font-medium text-gray-500">Tarih:</span>
+                <span className="ml-2">{formatDate(selectedOrder.createdAt)}</span>
+              </div>
+              <div>
+                <span className="font-medium text-gray-500">Saat:</span>
+                <span className="ml-2">{formatTime(selectedOrder.createdAt)}</span>
+              </div>
+            </div>
+
+            {/* Order Details */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Left Column */}
+              <div className="space-y-6">
+                {/* Customer Info */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-medium text-lg mb-3 flex items-center">
+                    <User size={18} className="mr-2" />
+                    Müşteri Bilgileri
+                  </h4>
+                  <div className="space-y-2">
+                    <p>
+                      <span className="font-medium text-gray-500">İsim:</span>{" "}
+                      {selectedOrder.customer.name}
+                    </p>
+                    <p>
+                      <span className="font-medium text-gray-500">Telefon:</span>{" "}
+                      {selectedOrder.customer.phone}
+                    </p>
+                    <p>
+                      <span className="font-medium text-gray-500">E-posta:</span>{" "}
+                      {selectedOrder.customer.email}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Address Info */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-medium text-lg mb-3 flex items-center">
+                    <MapPin size={18} className="mr-2" />
+                    Teslimat Adresi
+                  </h4>
+                  <p className="whitespace-pre-wrap">{selectedOrder.address}</p>
+                </div>
+
+                {/* Courier Info if assigned */}
+                {selectedOrder.courier && (
+                  <div className="border rounded-lg p-4">
+                    <h4 className="font-medium text-lg mb-3 flex items-center">
+                      <Truck size={18} className="mr-2" />
+                      Kurye Bilgileri
+                    </h4>
+                    <div className="space-y-2">
+                      <p>
+                        <span className="font-medium text-gray-500">İsim:</span>{" "}
+                        {selectedOrder.courier.name}
+                      </p>
+                      <p>
+                        <span className="font-medium text-gray-500">Telefon:</span>{" "}
+                        {selectedOrder.courier.phone}
+                      </p>
+                      {selectedOrderRoute && (
+                        <div className="mt-3">
+                          <p className="font-medium text-gray-500">Teslimat Tahmini:</p>
+                          <div className="flex space-x-3 mt-1">
+                            <span className="inline-flex items-center bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
+                              <Clock size={14} className="mr-1" /> 
+                              {Math.floor(selectedOrderRoute.totalDuration / 60)}s {selectedOrderRoute.totalDuration % 60}d
+                            </span>
+                            <span className="inline-flex items-center bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
+                              <MapPin size={14} className="mr-1" /> 
+                              {selectedOrderRoute.totalDistance.toFixed(1)} km
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column */}
+              <div className="space-y-6">
+                {/* Order Items */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-medium text-lg mb-3 flex items-center">
+                    <Package size={18} className="mr-2" />
+                    Sipariş İçeriği
+                  </h4>
+                  <div className="space-y-3">
+                    {selectedOrder.items.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex justify-between items-center border-b pb-2 last:border-0"
+                      >
+                        <div>
+                          <p className="font-medium">{item.name}</p>
+                          <p className="text-sm text-gray-500">
+                            {item.quantity} adet x {formatCurrency(item.price)}
+                          </p>
+                          {item.notes && (
+                            <p className="text-sm italic text-gray-500">
+                              Not: {item.notes}
+                            </p>
+                          )}
+                        </div>
+                        <div className="font-medium">
+                          {formatCurrency(item.price * item.quantity)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 pt-3 border-t flex justify-between items-center">
+                    <span className="font-semibold">Toplam Tutar:</span>
+                    <span className="font-bold text-xl text-green-600">
+                      {formatCurrency(selectedOrder.totalPrice)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Notes if any */}
+                {selectedOrder.notes && (
+                  <div className="border rounded-lg p-4">
+                    <h4 className="font-medium text-lg mb-3">Sipariş Notları</h4>
+                    <p className="whitespace-pre-wrap">{selectedOrder.notes}</p>
+                  </div>
+                )}
+
+                {/* Status Update Buttons */}
+                {!["DELIVERED", "CANCELED"].includes(selectedOrder.status) && (
+                  <div className="border rounded-lg p-4 space-y-4">
+                    <h4 className="font-medium text-lg">Durum Güncelle</h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {selectedOrder.status === "PENDING" && (
+                        <>
+                          <button
+                            onClick={() => updateOrderStatus(selectedOrder.id, "PROCESSING")}
+                            className="py-2 px-3 rounded-md bg-blue-500 text-white text-sm hover:bg-blue-600"
+                          >
+                            Hazırlanıyor
+                          </button>
+                          <button
+                            onClick={() => updateOrderStatus(selectedOrder.id, "CANCELED")}
+                            className="py-2 px-3 rounded-md bg-red-500 text-white text-sm hover:bg-red-600"
+                          >
+                            İptal Et
+                          </button>
+                        </>
+                      )}
+                      {selectedOrder.status === "PROCESSING" && (
+                        <>
+                          <button
+                            onClick={() => updateOrderStatus(selectedOrder.id, "PREPARING")}
+                            className="py-2 px-3 rounded-md bg-yellow-500 text-white text-sm hover:bg-yellow-600"
+                          >
+                            Hazırlanıyor
+                          </button>
+                          <button
+                            onClick={() => updateOrderStatus(selectedOrder.id, "CANCELED")}
+                            className="py-2 px-3 rounded-md bg-red-500 text-white text-sm hover:bg-red-600"
+                          >
+                            İptal Et
+                          </button>
+                        </>
+                      )}
+                      {selectedOrder.status === "PREPARING" && (
+                        <>
+                          <button
+                            onClick={() => updateOrderStatus(selectedOrder.id, "READY")}
+                            className="py-2 px-3 rounded-md bg-emerald-500 text-white text-sm hover:bg-emerald-600"
+                          >
+                            Hazır
+                          </button>
+                          <button
+                            onClick={() => updateOrderStatus(selectedOrder.id, "CANCELED")}
+                            className="py-2 px-3 rounded-md bg-red-500 text-white text-sm hover:bg-red-600"
+                          >
+                            İptal Et
+                          </button>
+                        </>
+                      )}
+                      {selectedOrder.status === "READY" && selectedOrder.courier && (
+                        <button
+                          onClick={() => updateOrderStatus(selectedOrder.id, "IN_TRANSIT")}
+                          className="py-2 px-3 rounded-md bg-blue-500 text-white text-sm hover:bg-blue-600 col-span-2"
+                        >
+                          Teslimat Başladı
+                        </button>
+                      )}
+                      {selectedOrder.status === "IN_TRANSIT" && (
+                        <button
+                          onClick={() => updateOrderStatus(selectedOrder.id, "DELIVERED")}
+                          className="py-2 px-3 rounded-md bg-green-500 text-white text-sm hover:bg-green-600 col-span-2"
+                        >
+                          Teslim Edildi
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Rota Görüntüleme Modalı
+  const RouteViewModal = () => {
+    if (!showRouteView || !selectedOrderRoute) return null;
+
+    // Kurye konumu için kontrol - önce courier nesnesinde varsa, yoksa API yanıtında varsa
+    const courierPosition = selectedOrder?.courier?.currentLatitude && selectedOrder?.courier?.currentLongitude ? 
+      {
+        latitude: selectedOrder.courier.currentLatitude,
+        longitude: selectedOrder.courier.currentLongitude
+      } : selectedOrder?.courier?.latitude && selectedOrder?.courier?.longitude ? 
+      {
+        latitude: selectedOrder.courier.latitude,
+        longitude: selectedOrder.courier.longitude
+      } : undefined;
+
+    return (
+      <div className="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+          {/* Header */}
+          <div className="bg-gray-50 p-4 border-b flex justify-between items-center">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+              <Truck size={20} className="mr-2" />
+              {selectedOrder?.orderNumber ? `Sipariş #${selectedOrder.orderNumber} - Teslimat Rotası` : 'Teslimat Rotası'}
+            </h3>
+            <button
+              onClick={handleCloseRouteView}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <XCircle size={24} />
+            </button>
+          </div>
+          
+          {/* Map and Route Info */}
+          <div className="flex flex-col md:flex-row flex-grow h-[70vh]">
+            {/* Map */}
+            <div className="flex-grow h-full relative">
+              <RouteMap 
+                route={selectedOrderRoute} 
+                courierPosition={courierPosition}
+                loading={isLoadingRoute}
+                className="h-full"
+              />
+            </div>
+            
+            {/* Sidebar with Route Info */}
+            <div className="w-full md:w-80 border-t md:border-t-0 md:border-l overflow-y-auto">
+              <div className="p-4">
+                <h4 className="font-medium text-lg mb-3 flex items-center">
+                  <MapPin size={18} className="mr-2" />
+                  Teslimat Noktaları
+                </h4>
+                
+                {/* Route Summary */}
+                <div className="bg-blue-50 p-3 rounded mb-4">
+                  <div className="flex justify-between mb-2">
+                    <span className="font-medium">Toplam Mesafe:</span>
+                    <span>{selectedOrderRoute.totalDistance.toFixed(1)} km</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Tahmini Süre:</span>
+                    <span>{Math.floor(selectedOrderRoute.totalDuration / 60)}s {selectedOrderRoute.totalDuration % 60}d</span>
+                  </div>
+                </div>
+                
+                {/* Courier Info */}
+                {selectedOrder?.courier && (
+                  <div className="border rounded p-3 mb-4">
+                    <h5 className="font-medium mb-2">Kurye Bilgileri</h5>
+                    <p><span className="text-gray-500">İsim:</span> {selectedOrder.courier.name}</p>
+                    <p><span className="text-gray-500">Telefon:</span> {selectedOrder.courier.phone}</p>
+                  </div>
+                )}
+                
+                {/* Delivery Points */}
+                <div className="space-y-3">
+                  {selectedOrderRoute.deliveryPoints.map((point) => (
+                    <div key={point.id} className="border rounded p-3 bg-gray-50">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-500 text-white font-bold text-sm">
+                          {point.sequenceNumber}
+                        </span>
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          point.status === 'DELIVERED' ? 'bg-green-100 text-green-800' :
+                          point.status === 'PICKUP' ? 'bg-blue-100 text-blue-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {point.status === 'PICKUP' ? 'Alım Noktası' : 
+                           point.status === 'DELIVERED' ? 'Teslim Edildi' : 
+                           'Teslim Edilecek'}
+                        </span>
+                      </div>
+                      <p className="font-medium">{point.customerName}</p>
+                      <p className="text-sm text-gray-600 truncate">{point.address}</p>
+                      {point.estimatedArrival && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Tahmini Varış: {new Date(point.estimatedArrival).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <BusinessLayout>
       <div className="py-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+          <div className="flex items-center justify-between">
+            <Header title="Siparişler" />
+            <Link href="/business/policies" className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50">
+              <Settings className="h-4 w-4 mr-2" />
+              İade ve İptal Politikaları
+            </Link>
+          </div>
           <h1 className="text-2xl font-semibold text-gray-900">Sipariş Yönetimi</h1>
           <p className="mt-1 text-sm text-gray-600">
             Tüm siparişlerinizi görüntüleyin, yönetin ve durumlarını güncelleyin.
@@ -331,218 +755,270 @@ export default function BusinessOrders() {
         </div>
         
         <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 mt-6">
-          {/* Filtreler */}
-          <div className="bg-white shadow rounded-lg p-4 md:p-6 mb-6">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
-              <div className="flex flex-col sm:flex-row sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
-                <div className="relative rounded-md shadow-sm w-full sm:w-64">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Search className="h-5 w-5 text-gray-400" />
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Sipariş veya müşteri ara..."
-                    className="px-4 py-2 pl-10 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 block w-full"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-gray-500">Durum:</span>
-                  <select
-                    className="bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                    value={selectedStatus}
-                    onChange={(e) => handleStatusChange(e.target.value)}
+          <div className="mb-6">
+            {/* Üst menü -> filtreleme, arama vb. */}
+            <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+              <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                {/* Sipariş durumu filtreleme */}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => handleStatusChange("all")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "all"
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
                   >
-                    <option value="all">Tüm Siparişler</option>
-                    <option value="PENDING">Bekleyen</option>
-                    <option value="PROCESSING">İşleniyor</option>
-                    <option value="PREPARING">Hazırlanıyor</option>
-                    <option value="READY">Hazır</option>
-                    <option value="IN_TRANSIT">Yolda</option>
-                    <option value="DELIVERED">Teslim Edildi</option>
-                    <option value="CANCELED">İptal Edildi</option>
-                  </select>
+                    Tümü
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange("PENDING")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "PENDING"
+                        ? "bg-yellow-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    Bekleyen
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange("PROCESSING")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "PROCESSING"
+                        ? "bg-blue-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    İşleme Alınan
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange("PREPARING")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "PREPARING"
+                        ? "bg-indigo-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    Hazırlanıyor
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange("READY")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "READY"
+                        ? "bg-emerald-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    Hazır
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange("IN_TRANSIT")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "IN_TRANSIT"
+                        ? "bg-cyan-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    Yolda
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange("DELIVERED")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "DELIVERED"
+                        ? "bg-green-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    Teslim Edildi
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange("CANCELED")}
+                    className={`px-3 py-2 text-sm rounded-md ${
+                      selectedStatus === "CANCELED"
+                        ? "bg-red-500 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    İptal Edildi
+                  </button>
+                </div>
+                
+                {/* Arama ve yenile butonları */}
+                <div className="flex gap-2 w-full md:w-auto">
+                  <div className="relative w-full md:w-64">
+                    <input
+                      type="text"
+                      placeholder="Sipariş veya müşteri ara..."
+                      className="block w-full border border-gray-300 rounded-md pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
+                  </div>
+                  <button
+                    onClick={() => fetchOrders(pagination.page, selectedStatus)}
+                    className="p-2 rounded-md border border-gray-300 hover:bg-gray-50"
+                    title="Yenile"
+                  >
+                    <RefreshCw size={20} className="text-gray-600" />
+                  </button>
                 </div>
               </div>
+            </div>
 
-              <button
-                onClick={() => fetchOrders(pagination.page, selectedStatus)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Yenile
-              </button>
-            </div>
-          </div>
-          
-          {/* Yükleniyor */}
-          {loading && (
-            <div className="flex justify-center items-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-            </div>
-          )}
-          
-          {/* Hata */}
-          {error && !loading && (
-            <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <AlertTriangle className="h-5 w-5 text-red-400" />
-                </div>
-                <div className="ml-3">
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
+            {/* Hata mesajı */}
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md text-red-600">
+                {error}
               </div>
-            </div>
-          )}
-          
-          {/* Sipariş Listesi */}
-          {!loading && !error && orders.length > 0 && (
-            <div className="bg-white shadow overflow-hidden sm:rounded-md">
-              <ul className="divide-y divide-gray-200">
-                {orders.map((order) => (
-                  <li key={order.id}>
-                    <div className="block hover:bg-gray-50">
-                      <div className="px-4 py-4 sm:px-6">
-                        <div className="flex items-center justify-between">
-                          <div className="flex flex-col sm:flex-row sm:items-center">
-                            <p className="text-sm font-medium text-blue-600 truncate mr-2">
-                              Sipariş #{order.orderNumber}
-                            </p>
-                            {getStatusBadge(order.status)}
+            )}
+            
+            {/* Sipariş listesi */}
+            <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
+              {loading ? (
+                <div className="flex justify-center items-center p-8">
+                  <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+                </div>
+              ) : orders.length === 0 ? (
+                <div className="p-8 text-center">
+                  <div className="inline-flex rounded-full bg-yellow-100 p-4 mb-4">
+                    <Package className="h-8 w-8 text-yellow-600" />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900">Sipariş Bulunamadı</h3>
+                  <p className="mt-2 text-gray-500">
+                    Seçilen filtre kriterlerine uygun sipariş bulunamadı. Lütfen filtreleri değiştirerek tekrar deneyin.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center space-x-1 cursor-pointer">
+                            <span>Sipariş No</span>
+                            <ArrowUpDown size={14} />
                           </div>
-                          <div className="ml-2 flex-shrink-0 flex">
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center space-x-1 cursor-pointer">
+                            <span>Tarih</span>
+                            <ArrowUpDown size={14} />
+                          </div>
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center space-x-1 cursor-pointer">
+                            <span>Müşteri</span>
+                            <ArrowUpDown size={14} />
+                          </div>
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center space-x-1 cursor-pointer">
+                            <span>Tutar</span>
+                            <ArrowUpDown size={14} />
+                          </div>
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <div className="flex items-center space-x-1 cursor-pointer">
+                            <span>Durum</span>
+                            <ArrowUpDown size={14} />
+                          </div>
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Kurye
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          İşlemler
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {orders.map((order) => (
+                        <tr key={order.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">{order.orderNumber}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">{formatDate(order.createdAt)}</div>
+                            <div className="text-xs text-gray-500">{formatTime(order.createdAt)}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">{order.customer.name}</div>
+                            <div className="text-xs text-gray-500">{order.customer.phone}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-semibold text-gray-900">{formatCurrency(order.totalPrice)}</div>
+                            <div className="text-xs text-gray-500">{order.items.length} ürün</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {getStatusBadge(order.status)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {order.courier ? (
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">{order.courier.name}</div>
+                                <div className="text-xs text-gray-500">{order.courier.phone}</div>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-500">Atanmadı</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <button
                               onClick={() => handleViewOrderDetails(order)}
-                              className="px-3 py-1 text-xs text-blue-700 hover:text-blue-500"
+                              className="text-blue-600 hover:text-blue-900 mr-3"
                             >
                               Detaylar
                             </button>
-                          </div>
-                        </div>
-                        <div className="mt-2 sm:flex sm:justify-between">
-                          <div className="sm:flex">
-                            <div className="flex items-center text-sm text-gray-500 mr-6">
-                              <User className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
-                              {order.customer.name}
-                            </div>
-                            <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0 mr-6">
-                              <MapPin className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
-                              {order.address.substring(0, 30)}...
-                            </div>
-                            <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
-                              <Receipt className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
-                              {formatCurrency(order.totalPrice)}
-                            </div>
-                          </div>
-                          <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
-                            <Calendar className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
-                            <p className="whitespace-nowrap">
-                              {formatDate(order.createdAt)} {formatTime(order.createdAt)}
-                            </p>
-                          </div>
-                        </div>
-                        
-                        {/* Sipariş İşlemleri */}
-                        {(order.status === "PENDING" || order.status === "PROCESSING" || order.status === "PREPARING") && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {order.status === "PENDING" && (
+                            {order.courier && (
                               <button
-                                onClick={() => updateOrderStatus(order.id, "PROCESSING")}
-                                className="inline-flex items-center px-2.5 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                                onClick={() => {
+                                  setSelectedOrder(order);
+                                  fetchOrderRoute(order.id);
+                                  setShowRouteView(true);
+                                }}
+                                className="text-green-600 hover:text-green-900 inline-flex items-center"
                               >
-                                Siparişi İşleme Al
+                                <MapIcon size={16} className="mr-1" />
+                                Rota
                               </button>
                             )}
-                            
-                            {order.status === "PROCESSING" && (
-                              <button
-                                onClick={() => updateOrderStatus(order.id, "PREPARING")}
-                                className="inline-flex items-center px-2.5 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                              >
-                                Hazırlamaya Başla
-                              </button>
-                            )}
-                            
-                            {order.status === "PREPARING" && (
-                              <button
-                                onClick={() => updateOrderStatus(order.id, "READY")}
-                                className="inline-flex items-center px-2.5 py-1.5 border border-transparent shadow-sm text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                              >
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Hazır İşaretle
-                              </button>
-                            )}
-                            
-                            {order.status !== "CANCELED" && order.status !== "DELIVERED" && (
-                              <button
-                                onClick={() => updateOrderStatus(order.id, "CANCELED")}
-                                className="inline-flex items-center px-2.5 py-1.5 border border-transparent shadow-sm text-xs font-medium rounded text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                              >
-                                <XCircle className="h-4 w-4 mr-1" />
-                                İptal Et
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               
               {/* Pagination */}
-              {pagination.pages > 1 && (
-                <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-                  <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm text-gray-700">
-                        Toplam <span className="font-medium">{pagination.total}</span> sipariş,{" "}
-                        <span className="font-medium">{pagination.page}</span>/{pagination.pages} sayfa
-                      </p>
-                    </div>
-                    <div>
-                      <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                        <button
-                          onClick={() => fetchOrders(pagination.page - 1, selectedStatus)}
-                          disabled={pagination.page === 1}
-                          className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${
-                            pagination.page === 1 ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                          }`}
-                        >
-                          <span className="sr-only">Önceki</span>
-                          &laquo; Önceki
-                        </button>
-                        <button
-                          onClick={() => fetchOrders(pagination.page + 1, selectedStatus)}
-                          disabled={pagination.page === pagination.pages}
-                          className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 ${
-                            pagination.page === pagination.pages ? "cursor-not-allowed opacity-50" : "cursor-pointer"
-                          }`}
-                        >
-                          <span className="sr-only">Sonraki</span>
-                          Sonraki &raquo;
-                        </button>
-                      </nav>
-                    </div>
+              {!loading && orders.length > 0 && (
+                <div className="px-6 py-3 bg-gray-50 border-t flex justify-between items-center">
+                  <div className="text-sm text-gray-500">
+                    Toplam {pagination.total} sipariş, {pagination.pages} sayfa
                   </div>
-                  <div className="flex sm:hidden justify-between w-full">
+                  <div className="flex space-x-2">
                     <button
                       onClick={() => fetchOrders(pagination.page - 1, selectedStatus)}
                       disabled={pagination.page === 1}
-                      className={`relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 ${
-                        pagination.page === 1 ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                      className={`px-3 py-1 rounded border text-sm ${
+                        pagination.page === 1
+                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          : "bg-white text-gray-600 hover:bg-gray-50"
                       }`}
                     >
                       Önceki
                     </button>
+                    <div className="px-3 py-1 text-sm font-medium">
+                      Sayfa {pagination.page} / {pagination.pages}
+                    </div>
                     <button
                       onClick={() => fetchOrders(pagination.page + 1, selectedStatus)}
-                      disabled={pagination.page === pagination.pages}
-                      className={`ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 ${
-                        pagination.page === pagination.pages ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                      disabled={pagination.page === pagination.pages || pagination.pages === 0}
+                      className={`px-3 py-1 rounded border text-sm ${
+                        pagination.page === pagination.pages || pagination.pages === 0
+                          ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          : "bg-white text-gray-600 hover:bg-gray-50"
                       }`}
                     >
                       Sonraki
@@ -551,215 +1027,15 @@ export default function BusinessOrders() {
                 </div>
               )}
             </div>
-          )}
-          
-          {/* Sipariş Bulunamadı */}
-          {!loading && !error && orders.length === 0 && (
-            <div className="bg-white shadow rounded-lg p-6 text-center">
-              <Package className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-2 text-lg font-medium text-gray-900">Sipariş bulunamadı</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                {selectedStatus === "all" 
-                  ? "Henüz hiç sipariş bulunmuyor." 
-                  : `${selectedStatus} durumunda sipariş bulunmuyor.`}
-              </p>
-            </div>
-          )}
+          </div>
         </div>
+        
+        {/* Sipariş detay modalı */}
+        {showOrderDetail && <OrderDetailModal />}
+        
+        {/* Rota görüntüleme modalı */}
+        {showRouteView && <RouteViewModal />}
       </div>
-      
-      {/* Sipariş Detay Modal */}
-      {showOrderDetail && selectedOrder && (
-        <div className="fixed inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
-            
-            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
-            
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full md:max-w-xl lg:max-w-2xl">
-              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-                <div className="sm:flex sm:items-start">
-                  <div className="mt-3 text-center sm:mt-0 sm:text-left w-full">
-                    <div className="flex justify-between items-center">
-                      <h3 className="text-lg leading-6 font-medium text-gray-900" id="modal-title">
-                        Sipariş Detayı #{selectedOrder.orderNumber}
-                      </h3>
-                      {getStatusBadge(selectedOrder.status)}
-                    </div>
-                    
-                    <div className="mt-4 border-t border-gray-200 pt-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-500">Müşteri Bilgileri</h4>
-                          <p className="mt-1 text-sm text-gray-900">{selectedOrder.customer.name}</p>
-                          <p className="mt-1 text-sm text-gray-900">{selectedOrder.customer.phone}</p>
-                          <p className="mt-1 text-sm text-gray-900">{selectedOrder.customer.email}</p>
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-500">Teslimat Bilgileri</h4>
-                          <p className="mt-1 text-sm text-gray-900">{selectedOrder.address}</p>
-                          {selectedOrder.courier ? (
-                            <div className="mt-2">
-                              <p className="text-sm font-medium text-gray-500">Kurye</p>
-                              <p className="mt-1 text-sm text-gray-900">{selectedOrder.courier.name}</p>
-                              <p className="mt-1 text-sm text-gray-900">{selectedOrder.courier.phone}</p>
-                              
-                              {/* Rota bilgisi ve harita butonunu göster */}
-                              <button
-                                onClick={() => setShowRouteView(true)}
-                                className="mt-2 inline-flex items-center px-3 py-1 border border-transparent text-sm font-medium rounded shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                              >
-                                <MapIcon className="h-4 w-4 mr-1" />
-                                Rotayı Görüntüle
-                              </button>
-                            </div>
-                          ) : (
-                            <p className="mt-1 text-sm text-gray-500">Henüz kurye atanmadı</p>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {/* Teslimat Rotası Görünümü */}
-                      {showRouteView && (
-                        <div className="mt-4">
-                          <div className="flex justify-between items-center mb-2">
-                            <h4 className="text-sm font-medium text-gray-500">Teslimat Rotası</h4>
-                            <button
-                              onClick={handleCloseRouteView}
-                              className="text-sm text-gray-500 hover:text-gray-700"
-                            >
-                              Kapat ×
-                            </button>
-                          </div>
-                          <div className="h-[300px] border border-gray-200 rounded-md overflow-hidden">
-                            <RouteMap
-                              route={selectedOrderRoute}
-                              loading={isLoadingRoute}
-                              className="h-full"
-                            />
-                          </div>
-                          <p className="mt-1 text-xs text-gray-500">
-                            Not: Harita üzerindeki noktalar, teslimat rotasını göstermektedir.
-                          </p>
-                        </div>
-                      )}
-                      
-                      <div className="mt-4">
-                        <h4 className="text-sm font-medium text-gray-500">Sipariş Detayları</h4>
-                        <div className="mt-2 overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
-                          <table className="min-w-full divide-y divide-gray-300">
-                            <thead className="bg-gray-50">
-                              <tr>
-                                <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Ürün</th>
-                                <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Adet</th>
-                                <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Fiyat</th>
-                                <th scope="col" className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900 sm:pr-6">Toplam</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 bg-white">
-                              {selectedOrder.items.map((item, index) => (
-                                <tr key={index}>
-                                  <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm text-gray-900 sm:pl-6">{item.name}</td>
-                                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{item.quantity}</td>
-                                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{formatCurrency(item.price)}</td>
-                                  <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 text-right sm:pr-6">{formatCurrency(item.price * item.quantity)}</td>
-                                </tr>
-                              ))}
-                              <tr className="bg-gray-50">
-                                <td colSpan={3} className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 text-right sm:pl-6">Toplam</td>
-                                <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-gray-900 text-right sm:pr-6">{formatCurrency(selectedOrder.totalPrice)}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                      
-                      {selectedOrder.notes && (
-                        <div className="mt-4">
-                          <h4 className="text-sm font-medium text-gray-500">Sipariş Notu</h4>
-                          <p className="mt-1 text-sm text-gray-900">{selectedOrder.notes}</p>
-                        </div>
-                      )}
-                      
-                      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-500">Sipariş Tarihi</h4>
-                          <p className="mt-1 text-sm text-gray-900">
-                            {formatDate(selectedOrder.createdAt)} {formatTime(selectedOrder.createdAt)}
-                          </p>
-                        </div>
-                        <div>
-                          <h4 className="text-sm font-medium text-gray-500">Tahmini Teslimat</h4>
-                          <p className="mt-1 text-sm text-gray-900">
-                            {selectedOrder.estimatedDelivery ? (
-                              <>
-                                {formatDate(selectedOrder.estimatedDelivery)} {formatTime(selectedOrder.estimatedDelivery)}
-                              </>
-                            ) : (
-                              "Belirtilmemiş"
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                {selectedOrder.status === "PENDING" && (
-                  <button
-                    type="button"
-                    className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
-                    onClick={() => updateOrderStatus(selectedOrder.id, "PROCESSING")}
-                  >
-                    Siparişi İşleme Al
-                  </button>
-                )}
-                
-                {selectedOrder.status === "PROCESSING" && (
-                  <button
-                    type="button"
-                    className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
-                    onClick={() => updateOrderStatus(selectedOrder.id, "PREPARING")}
-                  >
-                    Hazırlamaya Başla
-                  </button>
-                )}
-                
-                {selectedOrder.status === "PREPARING" && (
-                  <button
-                    type="button"
-                    className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-green-600 text-base font-medium text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 sm:ml-3 sm:w-auto sm:text-sm"
-                    onClick={() => updateOrderStatus(selectedOrder.id, "READY")}
-                  >
-                    <CheckCircle className="h-5 w-5 mr-2" />
-                    Hazır İşaretle
-                  </button>
-                )}
-                
-                {selectedOrder.status !== "CANCELED" && selectedOrder.status !== "DELIVERED" && (
-                  <button
-                    type="button"
-                    className="mt-3 w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
-                    onClick={() => updateOrderStatus(selectedOrder.id, "CANCELED")}
-                  >
-                    <XCircle className="h-5 w-5 mr-2" />
-                    İptal Et
-                  </button>
-                )}
-                
-                <button
-                  type="button"
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:w-auto sm:text-sm"
-                  onClick={closeOrderDetail}
-                >
-                  Kapat
-                </button>
-              </div>
-            </div>
-      </div>
-    </div>
-      )}
     </BusinessLayout>
   );
 } 

@@ -1,6 +1,7 @@
 import { NotificationType } from './notifications'
 import { createTemplateMessage } from './notificationTemplates'
 import twilio from 'twilio'
+import logger from '@/lib/logger'
 
 type SMSConfig = {
   apiKey: string
@@ -40,13 +41,19 @@ export async function sendSMS(data: SMSData): Promise<void> {
       to: data.to,
     })
 
-    console.log('SMS sent successfully:', {
-      sid: response.sid,
-      status: response.status,
-      to: data.to,
+    logger.info('SMS gönderildi', {
+      module: 'sms',
+      context: {
+        sid: response.sid,
+        status: response.status,
+        to: data.to
+      }
     })
   } catch (error) {
-    console.error('SMS error:', error)
+    logger.error('SMS gönderme hatası', error as Error, {
+      module: 'sms',
+      context: { to: data.to }
+    })
     throw new Error('SMS failed')
   }
 }
@@ -57,7 +64,10 @@ export async function checkSMSStatus(sid: string): Promise<string> {
     const message = await twilioClient.messages(sid).fetch()
     return message.status
   } catch (error) {
-    console.error('SMS status check error:', error)
+    logger.error('SMS durum kontrolü hatası', error as Error, {
+      module: 'sms',
+      context: { sid }
+    })
     throw new Error('Failed to check SMS status')
   }
 }
@@ -82,12 +92,17 @@ export async function sendBulkSMS(messages: SMSData[]): Promise<void> {
     // Başarılı ve başarısız gönderimleri logla
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
-        console.log(`SMS sent successfully to ${messages[index].to}:`, {
-          sid: result.value.sid,
-          status: result.value.status,
+        logger.info(`SMS gönderildi: ${messages[index].to}`, {
+          module: 'sms',
+          context: {
+            sid: result.value.sid,
+            status: result.value.status
+          }
         })
       } else {
-        console.error(`Failed to send SMS to ${messages[index].to}:`, result.reason)
+        logger.error(`SMS gönderimi başarısız: ${messages[index].to}`, new Error(result.reason as any), {
+          module: 'sms'
+        })
       }
     })
 
@@ -96,7 +111,10 @@ export async function sendBulkSMS(messages: SMSData[]): Promise<void> {
       throw new Error('All SMS messages failed to send')
     }
   } catch (error) {
-    console.error('Bulk SMS error:', error)
+    logger.error('Toplu SMS gönderimi hatası', error as Error, {
+      module: 'sms',
+      context: { messageCount: messages.length }
+    })
     throw new Error('Bulk SMS failed')
   }
 }

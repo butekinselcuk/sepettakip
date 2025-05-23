@@ -1,498 +1,683 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import axios from "axios";
-import { 
-  ArrowDown, 
-  ArrowUp, 
-  FileDown, 
-  Share2, 
-  Plus, 
-  MoreVertical,
-  Printer,
-  RefreshCw
-} from "lucide-react";
-import AdminLayout from "@/app/components/layouts/AdminLayout";
+import React, { useState, useEffect } from 'react';
+import AdminPageHeader from '@/components/admin/AdminPageHeader';
+import { ReportGenerator } from '@/components/reports/ReportGenerator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { useToast } from '@/app/components/ui/use-toast';
+import { Table, TableHeader, TableBody, TableRow, TableCell, TableHead } from '@/components/ui/table';
+import { formatDistance } from 'date-fns';
+import { tr } from 'date-fns/locale';
+import { DownloadIcon, ClockIcon, FileIcon, RefreshCw, Trash2, Edit, CheckCircle, XCircle } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
-interface Report {
+// Tablo için tip tanımlaması
+type ColumnDef<T> = {
+  accessorKey?: string;
+  id?: string;
+  header: string | React.ReactNode;
+  cell: (props: { row: { getValue: (key: string) => any; original: T } }) => React.ReactNode;
+};
+
+// Raporlar için sütun yapısı
+type Report = {
   id: string;
   title: string;
-  type: string;
-  status: string;
+  dataSource: string;
+  format: string;
   createdAt: string;
   updatedAt: string;
-  createdBy: string;
-  frequency?: string;
-  lastGenerated?: string;
-  totalDownloads: number;
+  filePath: string;
+};
+
+// Zamanlanmış raporlar için sütun yapısı
+type ScheduledReport = {
+  id: string;
+  title: string;
+  dataSource: string;
   format: string;
-}
+  frequency: string;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastRunStatus: string | null;
+  isEnabled: boolean;
+};
 
 export default function ReportsPage() {
+  const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState('generate');
   const [reports, setReports] = useState<Report[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterType, setFilterType] = useState("all");
-  const [filterDate, setFilterDate] = useState("all");
-  const [searchTerm, setSearchTerm] = useState("");
-  const router = useRouter();
-
-  useEffect(() => {
-    fetchReports();
-  }, []);
-
-  const fetchReports = async () => {
+  const [scheduledReports, setScheduledReports] = useState<ScheduledReport[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Raporları yükle
+  const loadReports = async () => {
+    setIsLoading(true);
     try {
-      setLoading(true);
-      const token = localStorage.getItem("token");
+      // localStorage'dan token'ı al
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       
       if (!token) {
-        router.push("/auth/login");
+        toast({
+          title: 'Hata',
+          description: 'Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.',
+          type: 'error'
+        } as any);
+        setIsLoading(false);
         return;
       }
-
-      // API çağrısı
-      const response = await axios.get('/api/admin/reports', {
+      
+      const response = await fetch('/api/admin/reports', {
         headers: {
-          Authorization: `Bearer ${token}`
+          'Authorization': `Bearer ${token}`
         }
       });
-
-      if (response.status === 200 && response.data.reports) {
-        setReports(response.data.reports);
-      } else {
-        // API sorunu varsa boş bir dizi kullan
-        setReports([]);
-        console.warn("Raporlar alınırken sorun oluştu:", response.status);
+      
+      if (!response.ok) {
+        throw new Error('Failed to load reports');
       }
       
-      setLoading(false);
+      const data = await response.json();
+      setReports(data.data);
     } catch (error) {
-      console.error("Raporlar yüklenirken hata:", error);
-      // API hatası durumunda boş bir dizi göster
-      setReports([]);
-      setLoading(false);
+      toast({
+        title: 'Hata',
+        description: 'Raporlar yüklenirken bir hata oluştu',
+        type: 'error'
+      } as any);
+    } finally {
+      setIsLoading(false);
     }
   };
-
-  // Filtreleri uygula
-  const applyFilters = () => {
-    let filteredReports = reports;
-    
-    // Durum filtreleme
-    if (filterStatus !== "all") {
-      filteredReports = filteredReports.filter(
-        (report) => report.status.toLowerCase() === filterStatus
-      );
-    }
-    
-    // Tür filtreleme
-    if (filterType !== "all") {
-      filteredReports = filteredReports.filter(
-        (report) => report.type.toLowerCase() === filterType
-      );
-    }
-    
-    // Tarih filtreleme
-    if (filterDate !== "all") {
-      const now = new Date();
-      const oneDay = 24 * 60 * 60 * 1000;
-      const oneWeek = 7 * oneDay;
-      const oneMonth = 30 * oneDay;
+  
+  // Zamanlanmış raporları yükle
+  const loadScheduledReports = async () => {
+    setIsLoading(true);
+    try {
+      // localStorage'dan token'ı al
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       
-      filteredReports = filteredReports.filter((report) => {
-        const reportDate = new Date(report.createdAt);
-        const diff = now.getTime() - reportDate.getTime();
-        
-        if (filterDate === "today") return diff < oneDay;
-        if (filterDate === "week") return diff < oneWeek;
-        if (filterDate === "month") return diff < oneMonth;
-        return true;
+      if (!token) {
+        toast({
+          title: 'Hata',
+          description: 'Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.',
+          type: 'error'
+        } as any);
+        setIsLoading(false);
+        return;
+      }
+      
+      const response = await fetch('/api/admin/reports/scheduled', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
+      
+      if (!response.ok) {
+        throw new Error('Failed to load scheduled reports');
+      }
+      
+      const data = await response.json();
+      setScheduledReports(data.data);
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: 'Zamanlanmış raporlar yüklenirken bir hata oluştu',
+        type: 'error'
+      } as any);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Sayfa yüklendiğinde raporları getir
+  useEffect(() => {
+    if (activeTab === 'reports') {
+      loadReports();
+    } else if (activeTab === 'scheduled') {
+      loadScheduledReports();
+    }
+  }, [activeTab]);
+  
+  // Rapor indirme işlemi
+  const downloadReport = async (reportId: string) => {
+    try {
+      window.open(`/api/admin/reports/download/${reportId}`, '_blank');
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: 'Rapor indirilirken bir hata oluştu',
+        type: 'error'
+      } as any);
+    }
+  };
+  
+  // Rapor silme işlemi
+  const deleteReport = async (reportId: string) => {
+    if (!confirm('Bu raporu silmek istediğinizden emin misiniz?')) {
+      return;
     }
     
-    // Arama terimi filtresi
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filteredReports = filteredReports.filter(
-        (report) =>
-          report.title.toLowerCase().includes(term) ||
-          report.id.toLowerCase().includes(term) ||
-          report.createdBy.toLowerCase().includes(term)
-      );
+    try {
+      const response = await fetch(`/api/admin/reports?id=${reportId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete report');
+      }
+      
+      toast({
+        title: 'Başarılı',
+        description: 'Rapor başarıyla silindi',
+        type: 'success'
+      } as any);
+      
+      // Tabloyu güncelle
+      loadReports();
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: 'Rapor silinirken bir hata oluştu',
+        type: 'error'
+      } as any);
+    }
+  };
+  
+  // Zamanlanmış rapor silme işlemi
+  const deleteScheduledReport = async (reportId: string) => {
+    if (!confirm('Bu zamanlanmış raporu silmek istediğinizden emin misiniz?')) {
+      return;
     }
     
-    return filteredReports;
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "completed":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-            Tamamlandı
-          </span>
-        );
-      case "scheduled":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-            Zamanlandı
-          </span>
-        );
-      case "failed":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-            Başarısız
-          </span>
-        );
-      case "processing":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-            İşleniyor
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-            {status}
-          </span>
-        );
+    try {
+      const response = await fetch(`/api/admin/reports/scheduled?id=${reportId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete scheduled report');
+      }
+      
+      toast({
+        title: 'Başarılı',
+        description: 'Zamanlanmış rapor başarıyla silindi',
+        type: 'success'
+      } as any);
+      
+      // Tabloyu güncelle
+      loadScheduledReports();
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: 'Zamanlanmış rapor silinirken bir hata oluştu',
+        type: 'error'
+      } as any);
     }
   };
-
-  const getFormatBadge = (format: string) => {
-    switch (format.toLowerCase()) {
-      case "pdf":
-        return (
-          <span className="px-2 py-1 text-xs rounded-full bg-red-50 text-red-700">
-            PDF
-          </span>
-        );
-      case "excel":
-        return (
-          <span className="px-2 py-1 text-xs rounded-full bg-green-50 text-green-700">
-            Excel
-          </span>
-        );
-      case "csv":
-        return (
-          <span className="px-2 py-1 text-xs rounded-full bg-blue-50 text-blue-700">
-            CSV
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2 py-1 text-xs rounded-full bg-gray-50 text-gray-700">
-            {format}
-          </span>
-        );
+  
+  // Zamanlanmış rapor durumunu değiştir
+  const toggleScheduledReportStatus = async (reportId: string, isEnabled: boolean) => {
+    try {
+      const response = await fetch('/api/admin/reports/scheduled', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: reportId,
+          isEnabled: !isEnabled,
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update scheduled report status');
+      }
+      
+      toast({
+        title: 'Başarılı',
+        description: `Zamanlanmış rapor ${!isEnabled ? 'etkinleştirildi' : 'devre dışı bırakıldı'}`,
+        type: 'success'
+      } as any);
+      
+      // Tabloyu güncelle
+      loadScheduledReports();
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: 'Zamanlanmış rapor durumu güncellenirken bir hata oluştu',
+        type: 'error'
+      } as any);
     }
   };
-
-  const getTypeName = (type: string) => {
-    switch (type.toLowerCase()) {
-      case "performance":
-        return "Performans Raporu";
-      case "financial":
-        return "Finansal Rapor";
-      case "delivery":
-        return "Teslimat Raporu";
-      case "courier":
-        return "Kurye Raporu";
-      case "analytics":
-        return "Analitik Raporu";
-      default:
-        return type;
+  
+  // Zamanlanmış raporları hemen çalıştır
+  const runScheduledReportsNow = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/admin/reports/scheduled/run', {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to run scheduled reports');
+      }
+      
+      const data = await response.json();
+      
+      toast({
+        title: 'Başarılı',
+        description: `${data.reportsRun} zamanlanmış rapor işlendi. ${data.successCount} başarılı, ${data.errorCount} hatalı.`,
+        type: 'success'
+      } as any);
+      
+      // Tabloyu güncelle
+      loadScheduledReports();
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: 'Zamanlanmış raporlar çalıştırılırken bir hata oluştu',
+        type: 'error'
+      } as any);
+    } finally {
+      setIsLoading(false);
     }
   };
-
-  const handleDownload = (id: string) => {
-    alert(`Rapor indiriliyor: ${id}`);
-  };
-
-  const handleShare = (id: string) => {
-    alert(`Rapor paylaşılıyor: ${id}`);
-  };
-
-  const handlePrint = (id: string) => {
-    alert(`Rapor yazdırılıyor: ${id}`);
-  };
-
-  const filteredReports = applyFilters();
-
-  return (
-    <AdminLayout>
-      <div className="py-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 mb-6">
-          <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-semibold text-gray-900">Raporlar</h1>
-            <div className="flex space-x-3">
-              <button
-                onClick={() => router.push("/admin/reports/scheduled")}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                Zamanlı Raporlar
-              </button>
-              <button
-                onClick={() => router.push("/admin/reports/create")}
-                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-              >
-                <Plus className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
-                Rapor Oluştur
-              </button>
-            </div>
-          </div>
+  
+  // Tablo sütunları - Raporlar
+  const reportColumns: ColumnDef<Report>[] = [
+    {
+      accessorKey: 'title',
+      header: 'Rapor Adı',
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <FileIcon size={16} className="text-muted-foreground" />
+          <span className="font-medium">{row.getValue('title')}</span>
         </div>
-
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
-          {/* Filtreler */}
-          <div className="bg-white shadow rounded-lg mb-6">
-            <div className="px-4 py-5 sm:p-6">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <label htmlFor="search" className="block text-sm font-medium text-gray-700">
-                    Ara
-                  </label>
-                  <input
-                    type="text"
-                    name="search"
-                    id="search"
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                    placeholder="Rapor adı, ID veya oluşturan..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="status" className="block text-sm font-medium text-gray-700">
-                    Durum
-                  </label>
-                  <select
-                    id="status"
-                    name="status"
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                    value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
-                  >
-                    <option value="all">Tümü</option>
-                    <option value="completed">Tamamlandı</option>
-                    <option value="scheduled">Zamanlandı</option>
-                    <option value="processing">İşleniyor</option>
-                    <option value="failed">Başarısız</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label htmlFor="type" className="block text-sm font-medium text-gray-700">
-                    Rapor Türü
-                  </label>
-                  <select
-                    id="type"
-                    name="type"
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
-                  >
-                    <option value="all">Tümü</option>
-                    <option value="performance">Performans</option>
-                    <option value="financial">Finansal</option>
-                    <option value="delivery">Teslimat</option>
-                    <option value="courier">Kurye</option>
-                    <option value="analytics">Analitik</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label htmlFor="date" className="block text-sm font-medium text-gray-700">
-                    Tarih
-                  </label>
-                  <select
-                    id="date"
-                    name="date"
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                    value={filterDate}
-                    onChange={(e) => setFilterDate(e.target.value)}
-                  >
-                    <option value="all">Tümü</option>
-                    <option value="today">Bugün</option>
-                    <option value="week">Bu Hafta</option>
-                    <option value="month">Bu Ay</option>
-                  </select>
-                </div>
-              </div>
-              
-              <div className="mt-4 flex justify-end">
-                <button
-                  onClick={fetchReports}
-                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  <RefreshCw className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
-                  Yenile
-                </button>
-              </div>
-            </div>
+      ),
+    },
+    {
+      accessorKey: 'dataSource',
+      header: 'Veri Kaynağı',
+      cell: ({ row }) => {
+        const dataSource = row.getValue('dataSource') as string;
+        const dataSourceMap: Record<string, string> = {
+          orders: 'Siparişler',
+          couriers: 'Kuryeler',
+          businesses: 'İşletmeler',
+          customers: 'Müşteriler',
+          deliveries: 'Teslimatlar',
+        };
+        
+        return <span>{dataSourceMap[dataSource] || dataSource}</span>;
+      },
+    },
+    {
+      accessorKey: 'format',
+      header: 'Format',
+      cell: ({ row }) => {
+        const format = row.getValue('format') as string;
+        const formatColors: Record<string, string> = {
+          excel: 'bg-green-100 text-green-800',
+          pdf: 'bg-red-100 text-red-800',
+          csv: 'bg-blue-100 text-blue-800',
+        };
+        
+        return (
+          <Badge className={formatColors[format] || ''}>
+            {format.toUpperCase()}
+          </Badge>
+        );
+      },
+    },
+    {
+      accessorKey: 'createdAt',
+      header: 'Oluşturulma Tarihi',
+      cell: ({ row }) => {
+        const createdAt = new Date(row.getValue('createdAt'));
+        return (
+          <div className="flex flex-col">
+            <span>{createdAt.toLocaleDateString('tr-TR')}</span>
+            <span className="text-xs text-muted-foreground">
+              {createdAt.toLocaleTimeString('tr-TR')}
+            </span>
           </div>
-
-          {/* Rapor Listesi */}
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-4 py-5 sm:p-6">
-              {loading ? (
-                <div className="flex justify-center items-center h-64">
-                  <div className="loader"></div>
-                </div>
-              ) : filteredReports.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Rapor
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Tür
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Durum
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Tarih
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          Format
-                        </th>
-                        <th
-                          scope="col"
-                          className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider"
-                        >
-                          İşlemler
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredReports.map((report) => (
-                        <tr key={report.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              <div>
-                                <div className="text-sm font-medium text-gray-900">
-                                  {report.title}
-                                </div>
-                                <div className="text-sm text-gray-500">
-                                  #{report.id} • {report.createdBy}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">{getTypeName(report.type)}</div>
-                            {report.frequency && (
-                              <div className="text-sm text-gray-500">{report.frequency}</div>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {getStatusBadge(report.status)}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="text-sm text-gray-900">
-                              {new Date(report.createdAt).toLocaleDateString("tr-TR")}
-                            </div>
-                            <div className="text-sm text-gray-500">
-                              {new Date(report.createdAt).toLocaleTimeString("tr-TR")}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center">
-                              {getFormatBadge(report.format)}
-                              <span className="ml-2 text-sm text-gray-500">
-                                {report.totalDownloads} indirme
-                              </span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <div className="flex items-center justify-end space-x-3">
-                              <button
-                                onClick={() => handleDownload(report.id)}
-                                className="text-blue-600 hover:text-blue-900"
-                              >
-                                <FileDown className="h-5 w-5" aria-hidden="true" />
-                              </button>
-                              <button
-                                onClick={() => handleShare(report.id)}
-                                className="text-blue-600 hover:text-blue-900"
-                              >
-                                <Share2 className="h-5 w-5" aria-hidden="true" />
-                              </button>
-                              <button
-                                onClick={() => handlePrint(report.id)}
-                                className="text-blue-600 hover:text-blue-900"
-                              >
-                                <Printer className="h-5 w-5" aria-hidden="true" />
-                              </button>
-                              <button
-                                onClick={() => router.push(`/admin/reports/${report.id}`)}
-                                className="text-gray-400 hover:text-gray-500"
-                              >
-                                <MoreVertical className="h-5 w-5" aria-hidden="true" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="text-center py-12">
-                  <svg
-                    className="mx-auto h-12 w-12 text-gray-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">Rapor bulunamadı</h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Herhangi bir rapor oluşturmak için başlayın.
-                  </p>
-                  <div className="mt-6">
-                    <button
-                      onClick={() => router.push("/admin/reports/create")}
-                      className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                    >
-                      <Plus className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
-                      Yeni Rapor
-                    </button>
-                  </div>
-                </div>
+        );
+      },
+    },
+    {
+      id: 'actions',
+      header: 'İşlemler',
+      cell: ({ row }) => {
+        const report = row.original;
+        return (
+          <div className="flex gap-2">
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={() => downloadReport(report.id)}
+              title="İndir"
+            >
+              <DownloadIcon size={16} />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={() => deleteReport(report.id)}
+              title="Sil"
+            >
+              <Trash2 size={16} className="text-destructive" />
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+  
+  // Tablo sütunları - Zamanlanmış Raporlar
+  const scheduledReportColumns: ColumnDef<ScheduledReport>[] = [
+    {
+      accessorKey: 'title',
+      header: 'Rapor Adı',
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <ClockIcon size={16} className="text-muted-foreground" />
+          <span className="font-medium">{row.getValue('title')}</span>
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'frequency',
+      header: 'Sıklık',
+      cell: ({ row }) => {
+        const frequency = row.getValue('frequency') as string;
+        const frequencyMap: Record<string, string> = {
+          daily: 'Günlük',
+          weekly: 'Haftalık',
+          monthly: 'Aylık',
+        };
+        
+        return <span>{frequencyMap[frequency] || frequency}</span>;
+      },
+    },
+    {
+      accessorKey: 'nextRunAt',
+      header: 'Sonraki Çalışma',
+      cell: ({ row }) => {
+        const nextRunAt = new Date(row.getValue('nextRunAt'));
+        const now = new Date();
+        
+        return (
+          <div className="flex flex-col">
+            <span>{nextRunAt.toLocaleDateString('tr-TR')}</span>
+            <span className="text-xs text-muted-foreground">
+              {formatDistance(nextRunAt, now, { addSuffix: true, locale: tr })}
+            </span>
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'lastRunStatus',
+      header: 'Son Durum',
+      cell: ({ row }) => {
+        const status = row.getValue('lastRunStatus') as string;
+        const lastRunAt = row.original.lastRunAt 
+          ? new Date(row.original.lastRunAt) 
+          : null;
+        
+        if (!status) {
+          return <span className="text-muted-foreground">Henüz çalıştırılmadı</span>;
+        }
+        
+        return (
+          <div className="flex items-center gap-2">
+            {status === 'SUCCESS' ? (
+              <CheckCircle size={16} className="text-green-500" />
+            ) : (
+              <XCircle size={16} className="text-red-500" />
+            )}
+            <span>
+              {status === 'SUCCESS' ? 'Başarılı' : 'Hata'}
+              {lastRunAt && (
+                <span className="text-xs block text-muted-foreground">
+                  {lastRunAt.toLocaleDateString('tr-TR')} {lastRunAt.toLocaleTimeString('tr-TR')}
+                </span>
               )}
-            </div>
+            </span>
           </div>
-        </div>
-      </div>
-    </AdminLayout>
+        );
+      },
+    },
+    {
+      accessorKey: 'isEnabled',
+      header: 'Durum',
+      cell: ({ row }) => {
+        const isEnabled = row.getValue('isEnabled') as boolean;
+        
+        return (
+          <Badge className={isEnabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
+            {isEnabled ? 'Aktif' : 'Pasif'}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: 'actions',
+      header: 'İşlemler',
+      cell: ({ row }) => {
+        const report = row.original;
+        return (
+          <div className="flex gap-2">
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={() => toggleScheduledReportStatus(report.id, report.isEnabled)}
+              title={report.isEnabled ? 'Devre Dışı Bırak' : 'Etkinleştir'}
+            >
+              {report.isEnabled ? (
+                <XCircle size={16} className="text-destructive" />
+              ) : (
+                <CheckCircle size={16} className="text-green-500" />
+              )}
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              onClick={() => deleteScheduledReport(report.id)}
+              title="Sil"
+            >
+              <Trash2 size={16} className="text-destructive" />
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+  
+  return (
+    <div className="container py-6">
+      <AdminPageHeader
+        title="Raporlar"
+        description="Raporlar oluşturun, zamanlanmış raporlar yönetin ve mevcut raporlara erişin."
+      />
+      
+      <Tabs 
+        defaultValue="generate" 
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="mt-6"
+      >
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="generate">Rapor Oluştur</TabsTrigger>
+          <TabsTrigger value="reports">Raporlar</TabsTrigger>
+          <TabsTrigger value="scheduled">Zamanlanmış Raporlar</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="generate" className="mt-6">
+          <ReportGenerator
+            onGenerate={async () => {
+              toast({
+                title: 'Başarılı',
+                description: 'Rapor başarıyla oluşturuldu.',
+                type: 'success'
+              } as any);
+              // Tabloyu güncelle
+              loadReports();
+              return Promise.resolve();
+            }}
+          />
+        </TabsContent>
+        
+        <TabsContent value="reports" className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Raporlar</CardTitle>
+              <CardDescription>
+                Oluşturulmuş tüm raporları görüntüleyin ve indirin.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Rapor Adı</TableHead>
+                    <TableHead>Veri Kaynağı</TableHead>
+                    <TableHead>Format</TableHead>
+                    <TableHead>Oluşturulma Tarihi</TableHead>
+                    <TableHead>İşlemler</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>Yükleniyor...</TableCell>
+                    </TableRow>
+                  ) : reports.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>Henüz oluşturulmuş rapor bulunmuyor.</TableCell>
+                    </TableRow>
+                  ) : (
+                    reports.map((report: Report) => (
+                      <TableRow key={report.id}>
+                        <TableCell>{report.title}</TableCell>
+                        <TableCell>{report.dataSource}</TableCell>
+                        <TableCell>{report.format}</TableCell>
+                        <TableCell>{new Date(report.createdAt).toLocaleString('tr-TR')}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="icon"
+                              onClick={() => downloadReport(report.id)}
+                              title="İndir"
+                            >
+                              <DownloadIcon size={16} />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon"
+                              onClick={() => deleteReport(report.id)}
+                              title="Sil"
+                            >
+                              <Trash2 size={16} className="text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="scheduled" className="mt-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Zamanlanmış Raporlar</CardTitle>
+                <CardDescription>
+                  Otomatik olarak çalışacak zamanlanmış raporları yönetin.
+                </CardDescription>
+              </div>
+              <Button
+                onClick={runScheduledReportsNow}
+                disabled={isLoading}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Şimdi Çalıştır
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Rapor Adı</TableHead>
+                    <TableHead>Sıklık</TableHead>
+                    <TableHead>Sonraki Çalışma</TableHead>
+                    <TableHead>Son Durum</TableHead>
+                    <TableHead>Durum</TableHead>
+                    <TableHead>İşlemler</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    <TableRow>
+                      <TableCell colSpan={6}>Yükleniyor...</TableCell>
+                    </TableRow>
+                  ) : scheduledReports.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6}>Henüz zamanlanmış rapor bulunmuyor.</TableCell>
+                    </TableRow>
+                  ) : (
+                    scheduledReports.map((report: ScheduledReport) => (
+                      <TableRow key={report.id}>
+                        <TableCell>{report.title}</TableCell>
+                        <TableCell>{report.frequency}</TableCell>
+                        <TableCell>{new Date(report.nextRunAt).toLocaleString('tr-TR')}</TableCell>
+                        <TableCell>{report.lastRunStatus ? report.lastRunStatus : 'Henüz çalıştırılmadı'}</TableCell>
+                        <TableCell>{report.isEnabled ? 'Aktif' : 'Pasif'}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="icon"
+                              onClick={() => toggleScheduledReportStatus(report.id, report.isEnabled)}
+                              title={report.isEnabled ? 'Devre Dışı Bırak' : 'Etkinleştir'}
+                            >
+                              {report.isEnabled ? (
+                                <XCircle size={16} className="text-destructive" />
+                              ) : (
+                                <CheckCircle size={16} className="text-green-500" />
+                              )}
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="icon"
+                              onClick={() => deleteScheduledReport(report.id)}
+                              title="Sil"
+                            >
+                              <Trash2 size={16} className="text-destructive" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 } 

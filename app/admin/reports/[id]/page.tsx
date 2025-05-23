@@ -5,6 +5,17 @@ import { useRouter } from "next/navigation";
 import AdminLayout from "@/app/components/layouts/AdminLayout";
 import axios from "axios";
 
+interface ReportParameters {
+  startDate?: string;
+  endDate?: string;
+  businessId?: string;
+  courierId?: string;
+  includeCharts?: boolean;
+  includeDetails?: boolean;
+  filters?: Record<string, string>;
+  [key: string]: any;
+}
+
 interface Report {
   id: string;
   name: string;
@@ -14,7 +25,7 @@ interface Report {
   createdAt: string;
   completedAt?: string;
   resultUrl?: string;
-  parameters: any;
+  parameters: ReportParameters;
   userId: string;
   user?: {
     name: string;
@@ -32,6 +43,7 @@ export default function ReportDetail({ params }: { params: { id: string } }) {
     const fetchReport = async () => {
       try {
         setLoading(true);
+        setError("");
         const token = localStorage.getItem("token");
         
         if (!token) {
@@ -39,40 +51,12 @@ export default function ReportDetail({ params }: { params: { id: string } }) {
           return;
         }
 
-        try {
-          const response = await axios.get(`/api/reports/${params.id}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          
-          setReport(response.data);
-        } catch (err) {
-          console.error("API error:", err);
-          
-          // Mock data for development/demo purposes
-          setReport({
-            id: params.id,
-            name: "Aylık Satış Raporu",
-            type: "SALES",
-            format: "PDF",
-            status: "COMPLETED",
-            createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-            completedAt: new Date(Date.now() - 6.9 * 24 * 60 * 60 * 1000).toISOString(),
-            resultUrl: "#",
-            parameters: {
-              startDate: "2023-01-01",
-              endDate: "2023-01-31",
-              businessId: "business-123",
-              includeCharts: true
-            },
-            userId: "1",
-            user: {
-              name: "Admin User",
-              email: "admin@example.com"
-            }
-          });
-        }
+        const response = await axios.get(`/api/reports/${params.id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        setReport(response.data);
       } catch (err) {
-        console.error("Rapor getirme hatası:", err);
         setError("Rapor detayları yüklenirken bir hata oluştu.");
       } finally {
         setLoading(false);
@@ -144,10 +128,9 @@ export default function ReportDetail({ params }: { params: { id: string } }) {
         }
       );
       
-      alert("Rapor yeniden oluşturma talebi gönderildi");
+      // Başarılı bildirim göster ve listeye yönlendir
       router.push('/admin/reports');
     } catch (err) {
-      console.error("Rapor yeniden çalıştırma hatası:", err);
       setError("Rapor yeniden oluşturulurken bir hata oluştu.");
     }
   };

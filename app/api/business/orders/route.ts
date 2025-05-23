@@ -1,150 +1,99 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyJwtToken, JWTPayload } from "@/lib/auth";
+import { verifyJwtToken } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Status } from "@prisma/client";
 
 // GET endpoint for fetching business orders
 export async function GET(request: NextRequest) {
   try {
-    // Get the authorization token from the request headers
-    const token = request.headers.get("authorization")?.split(" ")[1];
-
-    // Check if token exists
+    // Token doğrulama
+    const token = request.headers.get('authorization')?.split(' ')[1] || 
+                  request.cookies.get('token')?.value;
+    
     if (!token) {
       return NextResponse.json(
-        { error: "Unauthorized: Token required" },
+        { error: 'Yetkilendirme başarısız: Token bulunamadı' },
         { status: 401 }
       );
     }
-
-    // Verify the token
+    
     const decodedToken = await verifyJwtToken(token);
-    if (!decodedToken) {
+    
+    if (!decodedToken || !decodedToken.userId) {
       return NextResponse.json(
-        { error: "Unauthorized: Invalid token" },
+        { error: 'Yetkilendirme başarısız: Geçersiz token' },
         { status: 401 }
       );
     }
-
-    // Check if the user is a business
-    if (decodedToken.role !== "BUSINESS") {
+    
+    // Kullanıcı business mi kontrolü
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken.userId },
+      include: { business: true }
+    });
+    
+    if (!user || user.role !== 'BUSINESS' || !user.business) {
       return NextResponse.json(
-        { error: "Forbidden: Business access required" },
+        { error: 'Yetkilendirme başarısız: İşletme erişimi gerekiyor' },
         { status: 403 }
       );
     }
-
-    // Get the business ID from the user ID
-    const business = await prisma.business.findFirst({
-      where: {
-        userId: decodedToken.userId
-      }
-    });
-
-    if (!business) {
-      return NextResponse.json(
-        { error: "Business profile not found" },
-        { status: 404 }
-      );
-    }
-
-    const businessId = business.id;
-
-    // Get query parameters
-    const url = new URL(request.url);
-    const page = parseInt(url.searchParams.get("page") || "1");
-    const limit = parseInt(url.searchParams.get("limit") || "20");
-    const status = url.searchParams.get("status");
-
-    // Calculate pagination values
+    
+    const businessId = user.business.id;
+    
+    // URL parametrelerini al
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status');
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const page = parseInt(searchParams.get('page') || '1');
     const skip = (page - 1) * limit;
-
-    // Prepare filters
-    const filters: any = {
+    
+    // Filtreleme koşullarını oluştur
+    const where = {
       businessId: businessId,
+      ...(status ? { status } : {})
     };
-
-    // Add status filter if provided
-    if (status && status !== "all") {
-      filters.status = status as Status;
-    }
-
-    // Count total orders for pagination
-    const totalOrders = await prisma.order.count({
-      where: filters,
-    });
-
-    // Fetch orders with relations
+    
+    // Siparişleri getir
     const orders = await prisma.order.findMany({
-      where: filters,
+      where,
       include: {
         customer: {
           include: {
             user: {
               select: {
                 name: true,
-                email: true,
-              },
-            },
-          },
+                email: true
+              }
+            }
+          }
         },
-        courier: {
-          include: {
-            user: {
-              select: {
-                name: true,
-              },
-            },
-          },
-        },
+        delivery: true,
+        payments: true
       },
       orderBy: {
-        createdAt: "desc",
+        createdAt: 'desc'
       },
       skip,
-      take: limit,
+      take: limit
     });
-
-    // Calculate total pages
-    const totalPages = Math.ceil(totalOrders / limit);
-
-    // Return response with properly mapped data to match the frontend
+    
+    // Toplam sipariş sayısını getir
+    const totalOrders = await prisma.order.count({ where });
+    
     return NextResponse.json({
-      orders: orders.map((order) => ({
-        id: order.id,
-        orderNumber: order.id.substring(0, 8).toUpperCase(), // Generate order number from id
-        status: order.status,
-        createdAt: order.createdAt,
-        updatedAt: order.updatedAt,
-        estimatedDelivery: order.estimatedDelivery,
-        actualDelivery: order.actualDelivery,
-        items: order.items,
-        totalPrice: order.totalPrice,
-        notes: order.notes || "",
-        address: order.address,
-        customer: {
-          id: order.customerId,
-          name: order.customer.user.name,
-          email: order.customer.user.email,
-          phone: order.customer.phone || "",
-        },
-        courier: order.courier ? {
-          id: order.courierId as string,
-          name: order.courier.user.name,
-          phone: order.courier.phone || "",
-        } : null,
-      })),
+      orders,
       pagination: {
         total: totalOrders,
         page,
         limit,
-        pages: totalPages,
-      },
+        pages: Math.ceil(totalOrders / limit)
+      }
     });
   } catch (error) {
-    console.error("Error fetching business orders:", error);
+    console.error('Siparişleri getirirken hata:', error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: 'Siparişler alınırken bir hata oluştu' },
       { status: 500 }
     );
   }
@@ -153,251 +102,240 @@ export async function GET(request: NextRequest) {
 // PUT endpoint for updating order status
 export async function PUT(request: NextRequest) {
   try {
-    // Get the authorization token from the request headers
-    const token = request.headers.get("authorization")?.split(" ")[1];
-
-    // Check if token exists
+    // Token doğrulama
+    const token = request.headers.get('authorization')?.split(' ')[1] || 
+                  request.cookies.get('token')?.value;
+    
     if (!token) {
       return NextResponse.json(
-        { error: "Unauthorized: Token required" },
+        { error: 'Yetkilendirme başarısız: Token bulunamadı' },
         { status: 401 }
       );
     }
-
-    // Verify the token
+    
     const decodedToken = await verifyJwtToken(token);
-    if (!decodedToken) {
+    
+    if (!decodedToken || !decodedToken.userId) {
       return NextResponse.json(
-        { error: "Unauthorized: Invalid token" },
+        { error: 'Yetkilendirme başarısız: Geçersiz token' },
         { status: 401 }
       );
     }
-
-    // Check if the user is a business
-    if (decodedToken.role !== "BUSINESS") {
+    
+    // Kullanıcı business mi kontrolü
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken.userId },
+      include: { business: true }
+    });
+    
+    if (!user || user.role !== 'BUSINESS' || !user.business) {
       return NextResponse.json(
-        { error: "Forbidden: Business access required" },
+        { error: 'Yetkilendirme başarısız: İşletme erişimi gerekiyor' },
         { status: 403 }
       );
     }
-
-    // Get the business ID from the user ID
-    const business = await prisma.business.findFirst({
-      where: {
-        userId: decodedToken.userId
-      }
-    });
-
-    if (!business) {
-      return NextResponse.json(
-        { error: "Business profile not found" },
-        { status: 404 }
-      );
-    }
-
-    const businessId = business.id;
-
-    // Get request body
-    const { orderId, status } = await request.json();
-
-    // Validate required fields
-    if (!orderId || !status) {
-      return NextResponse.json(
-        { error: "Bad request: orderId and status are required" },
-        { status: 400 }
-      );
-    }
-
-    // Validate status value
-    const validStatuses = Object.values(Status).filter(s => 
-      ["PENDING", "PROCESSING", "PREPARING", "READY", "IN_TRANSIT", "DELIVERED", "CANCELLED"].includes(s)
-    );
     
-    if (!validStatuses.includes(status as Status)) {
+    const businessId = user.business.id;
+    
+    // Request verilerini al
+    const body = await request.json();
+    
+    // Sipariş ID'si kontrol et
+    if (!body.id) {
       return NextResponse.json(
-        { 
-          error: "Bad request: Invalid status value",
-          validValues: validStatuses
-        },
+        { error: 'Sipariş ID\'si belirtilmedi' },
         { status: 400 }
       );
     }
-
-    // Check if order exists and belongs to this business
+    
+    // Siparişin işletmeye ait olduğunu kontrol et
     const existingOrder = await prisma.order.findUnique({
-      where: {
-        id: orderId,
-      },
+      where: { id: body.id }
     });
-
+    
     if (!existingOrder) {
       return NextResponse.json(
-        { error: "Not found: Order does not exist" },
+        { error: 'Sipariş bulunamadı' },
         { status: 404 }
       );
     }
-
+    
     if (existingOrder.businessId !== businessId) {
       return NextResponse.json(
-        { error: "Forbidden: You can only update your own orders" },
+        { error: 'Bu siparişi güncelleme yetkiniz yok' },
         { status: 403 }
       );
     }
-
-    // Update the order status
+    
+    // Güncelleme verilerini hazırla
+    const updateData = {};
+    
+    if (body.status) updateData.status = body.status;
+    if (body.notes) updateData.notes = body.notes;
+    if (body.address) updateData.address = body.address;
+    
+    // Siparişi güncelle
     const updatedOrder = await prisma.order.update({
-      where: {
-        id: orderId,
-      },
-      data: {
-        status: status as Status,
-        updatedAt: new Date(),
-      },
+      where: { id: body.id },
+      data: updateData
     });
-
-    // Return response
+    
+    // Sipariş durumu değiştiyse bildirim gönder
+    if (body.status && body.status !== existingOrder.status) {
+      // İşletmeye bildirim
+      await prisma.notification.create({
+        data: {
+          type: 'ORDER_ACCEPTED',
+          title: 'Sipariş Durumu Güncellendi',
+          message: `${updatedOrder.id} numaralı siparişin durumu ${updatedOrder.status} olarak güncellendi.`,
+          isRead: false,
+          userId: user.id
+        }
+      });
+      
+      // Müşteriye bildirim
+      const customer = await prisma.customer.findUnique({
+        where: { id: updatedOrder.customerId },
+        select: { userId: true }
+      });
+      
+      if (customer) {
+        await prisma.notification.create({
+          data: {
+            type: 'ORDER_ACCEPTED',
+            title: 'Sipariş Durumunuz Güncellendi',
+            message: `${updatedOrder.id} numaralı siparişinizin durumu ${updatedOrder.status} olarak güncellendi.`,
+            isRead: false,
+            userId: customer.userId
+          }
+        });
+      }
+    }
+    
     return NextResponse.json({
-      message: "Order status updated successfully",
-      order: {
-        id: updatedOrder.id,
-        status: updatedOrder.status,
-        updatedAt: updatedOrder.updatedAt,
-      },
+      success: true,
+      order: updatedOrder
     });
   } catch (error) {
-    console.error("Error updating order status:", error);
+    console.error('Sipariş güncellenirken hata:', error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: 'Sipariş güncellenirken bir hata oluştu' },
       { status: 500 }
     );
   }
 }
 
 // POST: Yeni sipariş oluştur
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    // JWT token'ı doğrula
-    const token = request.headers.get("authorization")?.split(" ")[1];
-
+    // Token doğrulama
+    const token = request.headers.get('authorization')?.split(' ')[1] || 
+                  request.cookies.get('token')?.value;
+    
     if (!token) {
       return NextResponse.json(
-        { error: "Yetkilendirme token'ı eksik" },
+        { error: 'Yetkilendirme başarısız: Token bulunamadı' },
         { status: 401 }
       );
     }
-
+    
     const decodedToken = await verifyJwtToken(token);
-
-    if (!decodedToken) {
+    
+    if (!decodedToken || !decodedToken.userId) {
       return NextResponse.json(
-        { error: "Geçersiz token" },
+        { error: 'Yetkilendirme başarısız: Geçersiz token' },
         { status: 401 }
       );
     }
-
-    // Kullanıcının rolünü kontrol et
-    if (decodedToken.role !== "BUSINESS") {
+    
+    // Kullanıcı business mi kontrolü
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken.userId },
+      include: { business: true }
+    });
+    
+    if (!user || user.role !== 'BUSINESS' || !user.business) {
       return NextResponse.json(
-        { error: "Bu işlem için yetkiniz yok" },
+        { error: 'Yetkilendirme başarısız: İşletme erişimi gerekiyor' },
         { status: 403 }
       );
     }
-
-    // Business ID'yi token'dan al
-    const userId = decodedToken.userId;
-
-    // Önce işletme bilgilerini bul
-    const business = await prisma.business.findFirst({
-      where: {
-        userId: userId,
-      },
-    });
-
-    if (!business) {
-      return NextResponse.json(
-        { error: "İşletme bulunamadı" },
-        { status: 404 }
-      );
-    }
-
-    const businessId = business.id;
-
-    // Request body'den veri al
+    
+    const businessId = user.business.id;
+    
+    // Request verilerini al
     const body = await request.json();
-    const { customerId, items, totalPrice, address, notes, latitude, longitude } = body;
-
+    
     // Zorunlu alanları kontrol et
-    if (!customerId) {
+    if (!body.customerId || !body.zoneId || !body.items || !body.totalPrice || !body.address) {
       return NextResponse.json(
-        { error: "Müşteri ID'si belirtilmedi" },
+        { error: 'Eksik bilgiler: customerId, zoneId, items, totalPrice ve address alanları zorunludur' },
         { status: 400 }
       );
     }
-
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return NextResponse.json(
-        { error: "Sipariş öğeleri belirtilmedi veya geçersiz" },
-        { status: 400 }
-      );
-    }
-
-    if (typeof totalPrice !== 'number' || totalPrice <= 0) {
-      return NextResponse.json(
-        { error: "Geçersiz toplam fiyat" },
-        { status: 400 }
-      );
-    }
-
-    if (!address) {
-      return NextResponse.json(
-        { error: "Teslimat adresi belirtilmedi" },
-        { status: 400 }
-      );
-    }
-
-    // Müşterinin varlığını kontrol et
-    const customer = await prisma.customer.findUnique({
-      where: {
-        id: customerId,
-      },
-    });
-
-    if (!customer) {
-      return NextResponse.json(
-        { error: "Müşteri bulunamadı" },
-        { status: 404 }
-      );
-    }
-
-    // Yeni sipariş oluştur
-    const newOrder = await prisma.order.create({
+    
+    // Sipariş oluştur
+    const order = await prisma.order.create({
       data: {
-        status: Status.PENDING,
-        totalPrice,
-        items,
-        address,
-        notes,
-        latitude,
-        longitude,
-        businessId,
-        customerId,
-        estimatedDelivery: new Date(Date.now() + 30 * 60 * 1000), // 30 dakika sonrası
-      },
+        customerId: body.customerId,
+        businessId: businessId,
+        zoneId: body.zoneId,
+        items: typeof body.items === 'string' ? body.items : JSON.stringify(body.items),
+        totalPrice: body.totalPrice,
+        address: body.address,
+        notes: body.notes || null,
+        status: body.status || 'PENDING'
+      }
     });
-
+    
+    // Ödeme bilgisi varsa ödeme oluştur
+    if (body.payment) {
+      await prisma.payment.create({
+        data: {
+          amount: body.totalPrice,
+          method: body.payment.method || 'CASH',
+          status: body.payment.status || 'PENDING',
+          reference: body.payment.reference || null,
+          orderId: order.id,
+          customerId: body.customerId,
+          businessId: businessId
+        }
+      });
+    }
+    
+    // Sipariş bildirimi oluştur
+    await prisma.notification.create({
+      data: {
+        type: 'ORDER_PLACED',
+        title: 'Yeni Sipariş Alındı',
+        message: `${order.id} numaralı yeni bir sipariş alındı.`,
+        isRead: false,
+        userId: user.id
+      }
+    });
+    
+    // Müşteriye de bildirim gönder
+    await prisma.notification.create({
+      data: {
+        type: 'ORDER_PLACED',
+        title: 'Siparişiniz Alındı',
+        message: `${order.id} numaralı siparişiniz alındı. Durumu buradan takip edebilirsiniz.`,
+        isRead: false,
+        userId: (await prisma.customer.findUnique({
+          where: { id: body.customerId },
+          select: { userId: true }
+        }))?.userId || ''
+      }
+    });
+    
     return NextResponse.json({
-      message: "Sipariş başarıyla oluşturuldu",
-      order: {
-        id: newOrder.id,
-        status: newOrder.status,
-        createdAt: newOrder.createdAt,
-        estimatedDelivery: newOrder.estimatedDelivery,
-      },
+      success: true,
+      order
     });
   } catch (error) {
-    console.error("Sipariş oluşturma hatası:", error);
+    console.error('Sipariş oluştururken hata:', error);
     return NextResponse.json(
-      { error: "Sipariş oluşturulurken bir hata oluştu" },
+      { error: 'Sipariş oluşturulurken bir hata oluştu' },
       { status: 500 }
     );
   }

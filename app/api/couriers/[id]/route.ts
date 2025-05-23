@@ -8,6 +8,9 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Params'tan id değerini al (await ile)
+    const id = await params.id;
+    
     // JWT kontrolü
     const token = request.headers.get("authorization")?.split(" ")[1];
     if (!token) {
@@ -21,7 +24,7 @@ export async function GET(
 
     // Kurye bilgilerini getir
     const courier = await prisma.courier.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         user: {
           select: {
@@ -57,6 +60,9 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Params'tan id değerini al (await ile)
+    const id = await params.id;
+    
     // JWT kontrolü
     const token = request.headers.get("authorization")?.split(" ")[1];
     if (!token) {
@@ -73,7 +79,7 @@ export async function PATCH(
 
     // Kuryenin var olduğunu kontrol et
     const existingCourier = await prisma.courier.findUnique({
-      where: { id: params.id },
+      where: { id },
     });
 
     if (!existingCourier) {
@@ -85,7 +91,7 @@ export async function PATCH(
 
     // Kurye bilgilerini güncelle
     const updatedCourier = await prisma.courier.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         vehicleType,
         phone,

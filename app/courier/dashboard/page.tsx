@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
-import { useToast } from '../../components/ui/use-toast';
+import { useToast } from '@/app/components/ui/use-toast';
 import { AlertCircle, MapPin, CheckCircle, Clock, Package, User } from 'lucide-react';
-import axios from 'axios';
 
 // Tür tanımlamaları
 interface DeliveryItem {
@@ -17,10 +16,15 @@ interface DeliveryItem {
   price: number;
 }
 
+// Teslimat durumu için string literal tip
+type DeliveryStatus = 'PENDING' | 'PROCESSING' | 'DELIVERED' | 'CANCELLED' | 'FAILED';
+
 interface Delivery {
   id: string;
-  status: string;
+  status: DeliveryStatus;
   createdAt: Date | string;
+  completedAt?: Date | string;
+  updatedAt?: Date | string;
   estimatedDelivery?: Date | string;
   customerName: string;
   customerPhone: string;
@@ -29,6 +33,7 @@ interface Delivery {
   items: DeliveryItem[];
   totalPrice: number;
   estimatedDuration?: number;
+  actualDuration?: number;
   deliveryLatitude?: number;
   deliveryLongitude?: number;
 }
@@ -38,6 +43,12 @@ interface CourierStatistics {
   totalDeliveries: number;
   rating: number;
   earningsToday: string;
+}
+
+// API yanıtı için arayüz tanımı
+interface DeliveriesResponse {
+  activeDeliveries: Delivery[];
+  completedDeliveries: Delivery[];
 }
 
 export default function CourierDashboard() {
@@ -64,6 +75,21 @@ export default function CourierDashboard() {
       });
     }
     
+    // Kimlik doğrulama kontrolü - localStorage ve sessionStorage'dan kontrol et
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    if (!token) {
+      toast({
+        title: "Oturum hatası",
+        description: "Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.",
+        variant: "destructive"
+      });
+      
+      setTimeout(() => {
+        window.location.href = '/auth/login';
+      }, 2000);
+      return;
+    }
+    
     // Aktif ve tamamlanan teslimatları getir
     fetchDeliveries();
     
@@ -82,50 +108,109 @@ export default function CourierDashboard() {
   
   const fetchCourierStats = async () => {
     try {
+      setError("");
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+      
+      if (!token) {
+        toast({
+          title: "Oturum hatası",
+          description: "Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.",
+          variant: "destructive"
+        });
+        window.location.href = '/auth/login';
+        return;
+      }
+      
       const response = await fetch('/api/courier/stats', {
-        credentials: 'include'
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
       });
       
       if (!response.ok) {
-        console.error('Kurye istatistikleri alınamadı:', response.status, response.statusText);
-        return;
+        if (response.status === 401 || response.status === 403) {
+          toast({
+            title: "Yetkilendirme hatası",
+            description: "Oturum süreniz dolmuş olabilir. Lütfen tekrar giriş yapın.",
+            variant: "destructive"
+          });
+          
+          setTimeout(() => {
+            window.location.href = '/auth/login';
+          }, 2000);
+          return;
+        }
+        
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Kurye istatistikleri alınamadı: ${response.status} ${errorData.error || response.statusText}`);
       }
       
       const data = await response.json();
       setCourierStats(data);
     } catch (err) {
-      console.error('Kurye istatistikleri yüklenirken hata:', err);
+      const errorMessage = err instanceof Error ? err.message : "Bilinmeyen bir hata oluştu";
+      setError(`Kurye istatistikleri yüklenirken hata oluştu: ${errorMessage}`);
+      
+      toast({
+        title: "Veri yükleme hatası",
+        description: errorMessage,
+        variant: "destructive"
+      });
     }
   };
   
   const fetchDeliveries = async () => {
     try {
       setIsLoading(true);
+      setError("");
       
-      // Sayfanın yüklendiği konsola log
-      console.log("Teslimatlar yükleniyor...");
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       
-      // API çağrısı önce doğrudan kullan
-      const fetchDirectResponse = await fetch('/api/courier/deliveries', {
-        credentials: 'include'
-      });
-      
-      if (!fetchDirectResponse.ok) {
-        console.error('Doğrudan fetch hatası:', fetchDirectResponse.status, fetchDirectResponse.statusText);
-        throw new Error(`Fetch hatası: ${fetchDirectResponse.status} ${fetchDirectResponse.statusText}`);
+      if (!token) {
+        toast({
+          title: "Oturum hatası",
+          description: "Oturum bilgisi bulunamadı. Lütfen tekrar giriş yapın.",
+          variant: "destructive"
+        });
+        window.location.href = '/auth/login';
+        return;
       }
       
-      const data = await fetchDirectResponse.json();
-      console.log("Teslimat verileri:", data);
+      // API çağrısı
+      const response = await fetch('/api/courier/deliveries', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          toast({
+            title: "Yetkilendirme hatası",
+            description: "Oturum süreniz dolmuş olabilir. Lütfen tekrar giriş yapın.",
+            variant: "destructive"
+          });
+          
+          setTimeout(() => {
+            window.location.href = '/auth/login';
+          }, 2000);
+          return;
+        }
+        
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Teslimat verileri alınamadı: ${response.status} ${errorData.error || response.statusText}`);
+      }
+      
+      const data = await response.json();
       
       setActiveDeliveries(data.activeDeliveries || []);
       setCompletedDeliveries(data.completedDeliveries || []);
       setError('');
-    } catch (err: any) {
-      console.error('Teslimat verisi yükleme hatası:', err);
+    } catch (err) {
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : 'Teslimat verileri yüklenirken hata oluştu';
       
-      // Hata mesajını detaylı göster
-      const errorMessage = err.response?.data?.error || err.message || 'Bilinmeyen hata';
       setError(`Teslimat verileri yüklenirken hata oluştu: ${errorMessage}`);
       
       // Hata bildirimini göster
@@ -135,7 +220,7 @@ export default function CourierDashboard() {
         variant: "destructive",
       });
       
-      // Mock veriler yerine boş diziler ile devam et
+      // Boş diziler ile devam et
       setActiveDeliveries([]);
       setCompletedDeliveries([]);
     } finally {
@@ -153,8 +238,6 @@ export default function CourierDashboard() {
       async (position) => {
         try {
           setIsUpdatingLocation(true);
-          
-          console.log("Konum bilgisi alındı:", position.coords.latitude, position.coords.longitude);
           
           const response = await fetch('/api/couriers/location', {
             method: 'PATCH',
@@ -182,14 +265,14 @@ export default function CourierDashboard() {
             description: "Konumunuz başarıyla güncellendi.",
             variant: "default",
           });
-        } catch (err: any) {
-          console.error('Konum güncelleme hatası:', err);
-          setLocationError('Konum güncellemesi başarısız: ' + (err.response?.data?.error || err.message));
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Bilinmeyen hata';
+          setLocationError('Konum güncellemesi başarısız: ' + errorMessage);
           
           // Hata bildirimi göster
           toast({
             title: "Konum güncellemesi başarısız",
-            description: err.response?.data?.error || err.message,
+            description: errorMessage,
             variant: "destructive",
           });
         } finally {
@@ -197,7 +280,6 @@ export default function CourierDashboard() {
         }
       },
       (err) => {
-        console.error('Tarayıcı konum hatası:', err);
         setLocationError(`Tarayıcı konum hatası: ${err.message}`);
         setIsUpdatingLocation(false);
         
@@ -210,10 +292,8 @@ export default function CourierDashboard() {
     );
   };
   
-  const updateDeliveryStatus = async (deliveryId: string, status: string) => {
+  const updateDeliveryStatus = async (deliveryId: string, status: DeliveryStatus) => {
     try {
-      console.log(`Teslimat durumu güncelleniyor: ${deliveryId} -> ${status}`);
-      
       const response = await fetch(`/api/courier/deliveries/${deliveryId}/status`, {
         method: 'PATCH',
         headers: {
@@ -236,12 +316,12 @@ export default function CourierDashboard() {
       
       // Teslimatları yeniden yükle
       fetchDeliveries();
-    } catch (err: any) {
-      console.error('Teslimat durumu güncelleme hatası:', err);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Bilinmeyen hata';
       
       toast({
         title: "Durum güncellemesi başarısız",
-        description: err.response?.data?.error || err.message,
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -309,7 +389,6 @@ export default function CourierDashboard() {
                 navigator.geolocation.getCurrentPosition(
                   () => setIsLocationEnabled(true),
                   (error) => {
-                    console.error('Konum izni hatası:', error);
                     setLocationError(error.message);
                   }
                 );
@@ -347,7 +426,7 @@ export default function CourierDashboard() {
             </Card>
           ) : (
             <div className="grid gap-4">
-              {activeDeliveries.map((delivery: any) => (
+              {activeDeliveries.map((delivery) => (
                 <Card key={delivery.id}>
                   <CardHeader>
                     <CardTitle className="text-lg flex justify-between">
@@ -417,7 +496,7 @@ export default function CourierDashboard() {
             </Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
-              {completedDeliveries.map((delivery: any) => (
+              {completedDeliveries.map((delivery) => (
                 <Card key={delivery.id}>
                   <CardHeader>
                     <CardTitle className="text-lg flex justify-between">
@@ -429,7 +508,7 @@ export default function CourierDashboard() {
                       </Badge>
                     </CardTitle>
                     <CardDescription>
-                      {new Date(delivery.completedAt || delivery.updatedAt).toLocaleString()}
+                      {new Date(delivery.completedAt || delivery.updatedAt || delivery.createdAt).toLocaleString()}
                     </CardDescription>
                   </CardHeader>
                   <CardContent>

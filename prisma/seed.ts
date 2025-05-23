@@ -1,213 +1,324 @@
-import { PrismaClient, Role, Status } from '@prisma/client';
-import { hash } from 'bcrypt';
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('Başlangıç verileri yükleniyor...');
+  console.log('Seeding database...');
 
-  // Tüm verileri temizle (isteğe bağlı, geliştirme ortamında kullanılabilir)
-  // await prisma.menuItem.deleteMany();
-  // await prisma.business.deleteMany();
-  // await prisma.customer.deleteMany();
-  // await prisma.courier.deleteMany();
-  // await prisma.admin.deleteMany();
-  // await prisma.order.deleteMany();
-  // await prisma.user.deleteMany();
-  // await prisma.userSettings.deleteMany();
+  try {
+    // Kullanıcı şifreleri
+    const password = await bcrypt.hash('password123', 10);
+    const adminPassword = await bcrypt.hash('admin123', 10);
 
-  // Kullanıcı oluşturma işlevi
-  async function createUser(email: string, password: string, role: Role, fullName: string) {
-    const hashedPassword = await hash(password, 10);
-    
-    const existingUser = await prisma.user.findUnique({
-      where: { email }
-    });
-    
-    if (existingUser) {
-      console.log(`Kullanıcı zaten mevcut: ${email}`);
-      return existingUser;
-    }
-    
-    const user = await prisma.user.create({
+    // Admin kullanıcı
+    const adminUser = await prisma.user.create({
       data: {
-        email,
-        password: hashedPassword,
-        role,
-        name: fullName
-      }
-    });
-    
-    // Kullanıcı ayarlarını oluştur
-    await prisma.userSettings.create({
-      data: {
-        userId: user.id,
+        email: 'admin@sepet.com',
+        name: 'Admin User',
+        password: adminPassword,
+        role: 'ADMIN',
+        admin: {
+          create: {}
+        },
         settings: {
-          notifications: {
-            email: true,
-            push: true,
-            sms: false
-          },
-          preferences: {
-            language: 'tr',
-            darkMode: false,
-            timeZone: 'Europe/Istanbul'
-          },
-          privacy: {
-            shareLocation: true,
-            shareActivity: false
+          create: {
+            receiveNotifications: true,
+            emailNotifications: true,
+            pushNotifications: true,
+            smsNotifications: true,
+            theme: 'dark',
+            language: 'tr'
           }
-        }
-      }
-    });
-    
-    console.log(`Oluşturulan kullanıcı: ${email} (${role})`);
-    return user;
-  }
-
-  // Kullanıcıları oluştur
-  const adminUser = await createUser('admin@example.com', 'password', Role.ADMIN, 'Admin Kullanıcı');
-  const businessUser = await createUser('business@example.com', 'password', Role.BUSINESS, 'İşletme Kullanıcısı');
-  const courierUser = await createUser('courier@example.com', 'password', Role.COURIER, 'Kurye Kullanıcısı');
-  const customerUser = await createUser('customer@example.com', 'password', Role.CUSTOMER, 'Müşteri Kullanıcısı');
-
-  // Admin profili oluştur
-  const adminProfile = await prisma.admin.upsert({
-    where: { userId: adminUser.id },
-    update: {},
-    create: {
-      userId: adminUser.id
-    }
-  });
-  console.log('Admin profili oluşturuldu');
-
-  // İşletme profili oluştur
-  const business = await prisma.business.upsert({
-    where: { userId: businessUser.id },
-    update: {},
-    create: {
-      userId: businessUser.id,
-      name: 'Kebapçı Ahmet',
-      status: Status.ACTIVE,
-      phone: '+90 555 123 4567',
-      address: 'Kızılay Mahallesi, Atatürk Bulvarı No:123, Ankara',
-      description: 'Geleneksel lezzetleri modern sunumlarla buluşturan, 30 yıllık tecrübemizle hizmetinizdeyiz.',
-      website: 'www.kebapciahmet.com',
-      logoUrl: '/images/logo.png',
-      rating: 4.8
-    }
-  });
-  console.log('İşletme profili oluşturuldu');
-
-  // Müşteri profili oluştur
-  const customer = await prisma.customer.upsert({
-    where: { userId: customerUser.id },
-    update: {},
-    create: {
-      userId: customerUser.id,
-      address: 'Bahçelievler Mah. 7. Cadde No:42 D:5, Ankara',
-      phone: '+90 532 987 6543'
-    }
-  });
-  console.log('Müşteri profili oluşturuldu');
-
-  // Kurye profili oluştur
-  const courier = await prisma.courier.upsert({
-    where: { userId: courierUser.id },
-    update: {},
-    create: {
-      userId: courierUser.id,
-      status: Status.ACTIVE,
-      vehicleType: 'Motosiklet',
-      phone: '+90 541 234 5678',
-      currentLatitude: 39.9255,
-      currentLongitude: 32.8662,
-      lastLocationUpdate: new Date(),
-      ratings: 4.7
-    }
-  });
-  console.log('Kurye profili oluşturuldu');
-
-  // Menü öğeleri oluştur
-  const menuItems = [
-    { name: "Adana Kebap", description: "Acılı kıyma kebabı", price: 80, category: "Kebaplar", isAvailable: true, imageUrl: "/images/adana.jpg" },
-    { name: "Urfa Kebap", description: "Acısız kıyma kebabı", price: 75, category: "Kebaplar", isAvailable: true, imageUrl: "/images/urfa.jpg" },
-    { name: "Tavuk Şiş", description: "Marine edilmiş tavuk şiş", price: 65, category: "Kebaplar", isAvailable: true, imageUrl: "/images/tavuk-sis.jpg" },
-    { name: "Karışık Izgara", description: "Adana, şiş kebap ve kanat karışık porsiyon", price: 120, category: "Izgaralar", isAvailable: true, imageUrl: "/images/karisik.jpg" },
-    { name: "Lahmacun", description: "İnce hamur üzerinde kıymalı açık pide", price: 25, category: "Pideler", isAvailable: true, imageUrl: "/images/lahmacun.jpg" },
-    { name: "Kaşarlı Pide", description: "Kaşar peynirli pide", price: 45, category: "Pideler", isAvailable: true, imageUrl: "/images/kasarli-pide.jpg" },
-    { name: "Ayran", description: "Geleneksel Türk yoğurt içeceği", price: 10, category: "İçecekler", isAvailable: true, imageUrl: "/images/ayran.jpg" },
-    { name: "Şalgam", description: "Ekşi şalgam suyu", price: 10, category: "İçecekler", isAvailable: true, imageUrl: "/images/salgam.jpg" },
-    { name: "Künefe", description: "Kadayıf hamurundan yapılan peynirli tatlı", price: 60, category: "Tatlılar", isAvailable: true, imageUrl: "/images/kunefe.jpg" },
-    { name: "Baklava", description: "Fıstıklı baklava (4 dilim)", price: 70, category: "Tatlılar", isAvailable: true, imageUrl: "/images/baklava.jpg" }
-  ];
-
-  // Her bir menü öğesini oluştur
-  for (const item of menuItems) {
-    await prisma.menuItem.upsert({
-      where: { 
-        businessId_name: {
-          businessId: business.id,
-          name: item.name
         }
       },
-      update: {},
-      create: {
-        businessId: business.id,
-        name: item.name,
-        description: item.description,
-        price: item.price,
-        category: item.category,
-        isAvailable: item.isAvailable,
-        imageUrl: item.imageUrl
+      include: {
+        admin: true
       }
     });
-  }
-  console.log('Menü öğeleri oluşturuldu');
 
-  // Örnek siparişler oluştur
-  const orderStatuses = ['PENDING', 'PROCESSING', 'PREPARING', 'READY', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED'];
-  
-  for (let i = 0; i < 10; i++) {
-    const status = orderStatuses[Math.floor(Math.random() * orderStatuses.length)];
-    const price = Math.floor(Math.random() * 200) + 50;
-    
-    await prisma.order.create({
+    console.log('Admin user created:', adminUser.id);
+
+    // İşletme kullanıcısı
+    const businessUser = await prisma.user.create({
       data: {
-        customerId: customer.id,
-        businessId: business.id,
-        status: status as Status,
-        items: [
-          {
-            id: '1',
-            name: 'Adana Kebap',
-            quantity: 2,
-            price: 80
-          },
-          {
-            id: '2',
-            name: 'Ayran',
-            quantity: 2,
-            price: 10
+        email: 'business@sepet.com',
+        name: 'Business Owner',
+        password: password,
+        role: 'BUSINESS',
+        business: {
+          create: {
+            name: 'Test Market',
+            address: 'İstanbul, Türkiye',
+            phone: '+90 555 123 4567',
+            latitude: 41.0082,
+            longitude: 28.9784
           }
-        ],
-        totalPrice: price,
-        address: 'Bahçelievler Mah. 7. Cadde No:42 D:5, Ankara',
-        courierId: status === 'IN_TRANSIT' || status === 'DELIVERED' ? courier.id : null,
-        createdAt: new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000)
+        },
+        settings: {
+          create: {
+            receiveNotifications: true,
+            emailNotifications: true,
+            pushNotifications: true,
+            smsNotifications: false,
+            newOrderAlert: true,
+            newCustomerAlert: true,
+            deliveryStatusAlert: true,
+            theme: 'light',
+            language: 'tr'
+          }
+        }
+      },
+      include: {
+        business: true
       }
     });
-  }
-  console.log('Örnek siparişler oluşturuldu');
 
-  console.log('Seed verileri başarıyla yüklendi');
+    console.log('Business user created:', businessUser.id);
+
+    // Kurye kullanıcısı
+    const courierUser = await prisma.user.create({
+      data: {
+        email: 'courier@sepet.com',
+        name: 'Test Courier',
+        password: password,
+        role: 'COURIER',
+        courier: {
+          create: {
+            phone: '+90 555 987 6543',
+            latitude: 41.0062,
+            longitude: 28.9764,
+            isActive: true,
+            vehicleType: 'MOTORCYCLE',
+            status: 'AVAILABLE',
+            availabilityStatus: 'AVAILABLE',
+            currentLatitude: 41.0062,
+            currentLongitude: 28.9764,
+            documentsVerified: true
+          }
+        },
+        settings: {
+          create: {
+            receiveNotifications: true,
+            emailNotifications: false,
+            pushNotifications: true,
+            smsNotifications: true,
+            newDeliveryAlert: true,
+            deliveryStatusAlert: true,
+            theme: 'dark',
+            language: 'tr'
+          }
+        }
+      },
+      include: {
+        courier: true
+      }
+    });
+
+    console.log('Courier user created:', courierUser.id);
+
+    // Müşteri kullanıcısı
+    const customerUser = await prisma.user.create({
+      data: {
+        email: 'customer@sepet.com',
+        name: 'Test Customer',
+        password: password,
+        role: 'CUSTOMER',
+        customer: {
+          create: {
+            phone: '+90 555 111 2222',
+            address: 'İstanbul, Türkiye',
+            latitude: 41.0102,
+            longitude: 28.9704
+          }
+        },
+        settings: {
+          create: {
+            receiveNotifications: true,
+            emailNotifications: true,
+            pushNotifications: true,
+            smsNotifications: false,
+            orderStatusAlert: true,
+            deliveryStatusAlert: true,
+            theme: 'light',
+            language: 'tr'
+          }
+        }
+      },
+      include: {
+        customer: true
+      }
+    });
+
+    console.log('Customer user created:', customerUser.id);
+
+    // Test bölgesi oluştur
+    const zone = await prisma.zone.create({
+      data: {
+        name: 'İstanbul Merkez',
+        description: 'İstanbul merkez teslimat bölgesi',
+        boundaries: JSON.stringify({
+          type: 'Polygon',
+          coordinates: [
+            [
+              [28.9684, 41.0082],
+              [28.9884, 41.0082],
+              [28.9884, 41.0182],
+              [28.9684, 41.0182],
+              [28.9684, 41.0082]
+            ]
+          ]
+        }),
+        businessId: businessUser.business!.id
+      }
+    });
+
+    console.log('Zone created:', zone.id);
+
+    // Test ürünleri oluştur
+    const product1 = await prisma.product.create({
+      data: {
+        name: 'Ekmek',
+        description: 'Taze günlük ekmek',
+        price: 5.0,
+        imageUrl: 'https://example.com/bread.jpg',
+        stock: 100,
+        businessId: businessUser.business!.id
+      }
+    });
+
+    const product2 = await prisma.product.create({
+      data: {
+        name: 'Süt',
+        description: 'Günlük taze süt',
+        price: 15.0,
+        imageUrl: 'https://example.com/milk.jpg',
+        stock: 50,
+        businessId: businessUser.business!.id
+      }
+    });
+
+    console.log('Products created');
+
+    // Kurye için araç oluştur
+    const vehicle = await prisma.vehicle.create({
+      data: {
+        type: 'MOTORCYCLE',
+        make: 'Honda',
+        model: 'PCX',
+        year: 2022,
+        licensePlate: '34AB123',
+        color: 'Kırmızı',
+        courierId: courierUser.courier!.id
+      }
+    });
+
+    console.log('Vehicle created:', vehicle.id);
+
+    // Test siparişi oluştur
+    const order = await prisma.order.create({
+      data: {
+        customerId: customerUser.customer!.id,
+        businessId: businessUser.business!.id,
+        zoneId: zone.id,
+        status: 'PENDING',
+        items: JSON.stringify([
+          { id: product1.id, name: 'Ekmek', price: 5.0, quantity: 2 },
+          { id: product2.id, name: 'Süt', price: 15.0, quantity: 1 }
+        ]),
+        totalPrice: 25.0,
+        address: 'Test Mahallesi, Test Sokak No:1, İstanbul'
+      }
+    });
+
+    console.log('Order created:', order.id);
+
+    // Ödeme oluştur
+    const payment = await prisma.payment.create({
+      data: {
+        amount: 25.0,
+        method: 'CREDIT_CARD',
+        status: 'COMPLETED',
+        reference: 'PAY-123456789',
+        orderId: order.id,
+        customerId: customerUser.customer!.id,
+        businessId: businessUser.business!.id,
+        processedAt: new Date()
+      }
+    });
+
+    console.log('Payment created:', payment.id);
+
+    // Test teslimatı oluştur
+    const delivery = await prisma.delivery.create({
+      data: {
+        orderId: order.id,
+        courierId: courierUser.courier!.id,
+        customerId: customerUser.customer!.id,
+        zoneId: zone.id,
+        status: 'PENDING',
+        estimatedDuration: 30,
+        pickupAddress: 'Test Market, İstanbul',
+        pickupLatitude: 41.0082,
+        pickupLongitude: 28.9784,
+        dropoffAddress: 'Test Mahallesi, Test Sokak No:1, İstanbul',
+        dropoffLatitude: 41.0102,
+        dropoffLongitude: 28.9704,
+        distance: 2.5
+      }
+    });
+
+    console.log('Delivery created:', delivery.id);
+
+    // Bildirim oluştur
+    const notification1 = await prisma.notification.create({
+      data: {
+        type: 'ORDER_PLACED',
+        title: 'Yeni Sipariş',
+        message: 'Yeni bir sipariş oluşturuldu.',
+        userId: businessUser.id,
+        isRead: false
+      }
+    });
+
+    const notification2 = await prisma.notification.create({
+      data: {
+        type: 'COURIER_ASSIGNED',
+        title: 'Kurye Atandı',
+        message: 'Siparişiniz için kurye atandı.',
+        userId: customerUser.id,
+        isRead: false
+      }
+    });
+
+    console.log('Notifications created');
+
+    // Kurye ödeme oluştur
+    const courierPayment = await prisma.payment.create({
+      data: {
+        amount: 10.0,
+        method: 'TRANSFER',
+        status: 'COMPLETED',
+        reference: 'CR-PAY-12345',
+        courierId: courierUser.courier!.id,
+        processedAt: new Date()
+      }
+    });
+
+    console.log('Courier payment created:', courierPayment.id);
+
+    console.log('Database seeding completed.');
+  } catch (error) {
+    console.error('Error during seed operation:', error);
+  }
 }
 
 main()
-  .catch(e => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
+  .then(async () => {
     await prisma.$disconnect();
-  }); 
+  })
+  .catch(async (e) => {
+    console.error('Error during seeding:', e);
+    await prisma.$disconnect();
+    process.exit(1);
+  });

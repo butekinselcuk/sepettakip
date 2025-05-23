@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import CourierLayout from "@/app/components/layouts/CourierLayout";
@@ -79,6 +79,227 @@ export default function CourierDeliveries() {
   const [selectedDelivery, setSelectedDelivery] = useState<DeliveryDetailData | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<string>('');
+  const [shouldRecenterMap, setShouldRecenterMap] = useState<boolean>(false);
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("tr-TR");
+  };
+
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString("tr-TR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "ASSIGNED":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+            Atandı
+          </span>
+        );
+      case "PICKED_UP":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+            Alındı
+          </span>
+        );
+      case "IN_TRANSIT":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+            Yolda
+          </span>
+        );
+      case "DELIVERED":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+            Teslim Edildi
+          </span>
+        );
+      case "CANCELED":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+            İptal Edildi
+          </span>
+        );
+      case "FAILED":
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+            Teslim Edilemedi
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+            {status}
+          </span>
+        );
+    }
+  };
+
+  const generateRouteFromDeliveries = useCallback((deliveries: Delivery[]) => {
+    if (!deliveries || deliveries.length === 0) return undefined;
+
+    // Find active deliveries
+    const activeDeliveries = deliveries.filter(d => 
+      ["ASSIGNED", "PICKED_UP", "IN_TRANSIT"].includes(d.status)
+    );
+
+    if (activeDeliveries.length === 0) return undefined;
+
+    // Sort deliveries by estimated delivery time
+    const sortedDeliveries = [...activeDeliveries].sort((a, b) => 
+      new Date(a.estimatedDeliveryTime).getTime() - new Date(b.estimatedDeliveryTime).getTime()
+    );
+
+    // Use the first delivery's pickup location as the starting point
+    // If courier position is available, add that as the very first point
+    const deliveryPoints = [];
+    let sequenceNumber = 1;
+
+    // Add courier's current position if available
+    if (courierPosition) {
+      deliveryPoints.push({
+        id: 'courier-location',
+        address: 'Mevcut Konum',
+        latitude: courierPosition.latitude,
+        longitude: courierPosition.longitude,
+        sequenceNumber: sequenceNumber++,
+        status: 'CURRENT',
+        customerName: 'Kurye Konumu'
+      });
+    }
+
+    // Add pickup point
+    deliveryPoints.push({
+      id: 'pickup',
+      address: sortedDeliveries[0].pickupLocation.address,
+      latitude: sortedDeliveries[0].pickupLocation.latitude,
+      longitude: sortedDeliveries[0].pickupLocation.longitude,
+      sequenceNumber: sequenceNumber++,
+      status: 'PICKUP',
+      customerName: 'Teslim Alım Noktası'
+    });
+
+    // Convert deliveries to route points
+    const deliveryPoints2 = sortedDeliveries.map((delivery, index) => ({
+      id: delivery.id,
+      address: delivery.dropoffLocation.address,
+      latitude: delivery.dropoffLocation.latitude,
+      longitude: delivery.dropoffLocation.longitude,
+      sequenceNumber: sequenceNumber + index, // Continue sequence from pickup point
+      status: delivery.status,
+      customerName: delivery.customer.name,
+      estimatedArrival: formatTime(delivery.estimatedDeliveryTime)
+    }));
+
+    return {
+      courierId: 'current-courier',
+      courierName: 'Kurye',
+      deliveryPoints: [...deliveryPoints, ...deliveryPoints2],
+      totalDistance: sortedDeliveries.reduce((sum, delivery) => sum + delivery.distance, 0),
+      totalDuration: sortedDeliveries.reduce((sum, delivery) => sum + delivery.duration, 0),
+      lastUpdated: format(new Date(), 'dd MMMM yyyy HH:mm', { locale: tr })
+    };
+  }, [courierPosition, formatTime]);
+
+  const fetchRouteData = useCallback(async () => {
+    try {
+      setIsRefreshing(true);
+      const token = localStorage.getItem("token");
+      
+      if (!token) {
+        router.push("/auth/login");
+        return;
+      }
+
+      // Get courier ID from token or localStorage
+      // For this example, we'll use the courierId from the route parameter
+      const courierId = "current-courier"; // In a real app, get this from context or token
+
+      // Fetch route data from optimization API
+      const response = await axios.get(`/api/route-optimization?courierId=${courierId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (response.status === 200 && response.data.route) {
+        setRoute(response.data.route);
+        setLastUpdated(format(new Date(), 'dd MMMM yyyy HH:mm', { locale: tr }));
+      } else {
+        // If the API fails or returns no route, fall back to generating route from deliveries
+        const routeData = generateRouteFromDeliveries(deliveries);
+        setRoute(routeData);
+        setLastUpdated(format(new Date(), 'dd MMMM yyyy HH:mm', { locale: tr }));
+      }
+    } catch (error) {
+      console.error("Rota verileri yüklenirken hata:", error);
+      // Fall back to generating route from deliveries
+      const routeData = generateRouteFromDeliveries(deliveries);
+      setRoute(routeData);
+      setLastUpdated(format(new Date(), 'dd MMMM yyyy HH:mm', { locale: tr }));
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [deliveries, router, generateRouteFromDeliveries]);
+
+  const fetchDeliveries = useCallback(async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+      
+      if (!token) {
+        router.push("/auth/login");
+        return;
+      }
+
+      // API call
+      const response = await axios.get("/api/courier/deliveries", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (response.status === 200) {
+        const allDeliveries = response.data.deliveries;
+        setDeliveries(allDeliveries);
+        
+        // Separate active and completed deliveries
+        const active = allDeliveries.filter(
+          (delivery: Delivery) => 
+            ["ASSIGNED", "PICKED_UP", "IN_TRANSIT"].includes(delivery.status)
+        );
+        
+        const completed = allDeliveries.filter(
+          (delivery: Delivery) => 
+            ["DELIVERED", "CANCELED", "FAILED"].includes(delivery.status)
+        );
+        
+        setActiveDeliveries(active);
+        setCompletedDeliveries(completed);
+        
+        // Fetch route data after getting deliveries
+        await fetchRouteData();
+      } else {
+        setError("Teslimatlar yüklenirken bir hata oluştu.");
+      }
+    } catch (error) {
+      console.error("Teslimatlar yüklenirken hata:", error);
+      setError("Veriler yüklenemedi. Lütfen daha sonra tekrar deneyin.");
+      
+      // Reset states to empty values
+      setDeliveries([]);
+      setActiveDeliveries([]);
+      setCompletedDeliveries([]);
+      setRoute(undefined);
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [router, fetchRouteData]);
 
   useEffect(() => {
     fetchDeliveries();
@@ -114,74 +335,28 @@ export default function CourierDeliveries() {
         navigator.geolocation.clearWatch(watchId);
       };
     }
-  }, []);
-
-  const fetchDeliveries = async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem("token");
-      
-      if (!token) {
-        router.push("/auth/login");
-        return;
-      }
-
-      // API call
-      const response = await axios.get("/api/courier/deliveries", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      if (response.status === 200) {
-        const allDeliveries = response.data.deliveries;
-        setDeliveries(allDeliveries);
-        
-        // Separate active and completed deliveries
-        const active = allDeliveries.filter(
-          (delivery: Delivery) => 
-            ["ASSIGNED", "PICKED_UP", "IN_TRANSIT"].includes(delivery.status)
-        );
-        
-        const completed = allDeliveries.filter(
-          (delivery: Delivery) => 
-            ["DELIVERED", "CANCELED", "FAILED"].includes(delivery.status)
-        );
-        
-        setActiveDeliveries(active);
-        setCompletedDeliveries(completed);
-        
-        // Generate route data
-        const routeData = generateRouteFromDeliveries(allDeliveries);
-        setRoute(routeData);
-        setLastUpdated(format(new Date(), 'dd MMMM yyyy HH:mm', { locale: tr }));
-      } else {
-        setError("Teslimatlar yüklenirken bir hata oluştu.");
-      }
-    } catch (error) {
-      console.error("Teslimatlar yüklenirken hata:", error);
-      setError("Veriler yüklenemedi. Lütfen daha sonra tekrar deneyin.");
-      
-      // Reset states to empty values
-      setDeliveries([]);
-      setActiveDeliveries([]);
-      setCompletedDeliveries([]);
-      setRoute(undefined);
-    } finally {
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  };
+  }, [fetchDeliveries]);
 
   const handleDeliveryClick = (pointId: string) => {
     if (!route) return;
     
-    // Skip if this is the pickup point
-    if (pointId === 'pickup') return;
+    // Handle different point types
+    if (pointId === 'courier-location') {
+      // Clicking on courier location - we could show courier info here
+      return;
+    }
+    
+    if (pointId === 'pickup' || pointId.startsWith('pickup-')) {
+      // Clicking on pickup point - maybe show business info
+      return;
+    }
     
     // Find the delivery in our deliveries array
     const delivery = deliveries.find(d => d.id === pointId);
     if (!delivery) return;
+    
+    // Find the delivery point to get the sequence number
+    const pointData = route.deliveryPoints.find(p => p.id === pointId);
     
     // Create detailed delivery data
     const detailData: DeliveryDetailData = {
@@ -193,7 +368,7 @@ export default function CourierDeliveries() {
       longitude: delivery.dropoffLocation.longitude,
       status: delivery.status,
       estimatedArrival: formatTime(delivery.estimatedDeliveryTime),
-      sequenceNumber: route.deliveryPoints.find(p => p.id === pointId)?.sequenceNumber || 0,
+      sequenceNumber: pointData?.sequenceNumber || 0,
       orderItems: delivery.orderItems || [],
       notes: delivery.notes || ''
     };
@@ -240,143 +415,6 @@ export default function CourierDeliveries() {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("tr-TR");
-  };
-
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString("tr-TR", {
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "ASSIGNED":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-            Atandı
-          </span>
-        );
-      case "PICKED_UP":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-100 text-indigo-800">
-            Teslim Alındı
-          </span>
-        );
-      case "IN_TRANSIT":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800">
-            Yolda
-          </span>
-        );
-      case "DELIVERED":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-            Teslim Edildi
-          </span>
-        );
-      case "CANCELED":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
-            İptal Edildi
-          </span>
-        );
-      case "FAILED":
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-            Başarısız
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-            {status}
-          </span>
-        );
-    }
-  };
-
-  const filteredDeliveries = () => {
-    let filtered = [...deliveries];
-    
-    // Status filter
-    if (statusFilter !== "all") {
-      filtered = filtered.filter(delivery => {
-        if (statusFilter === "active") {
-          return ["ASSIGNED", "PICKED_UP", "IN_TRANSIT"].includes(delivery.status);
-        } else if (statusFilter === "completed") {
-          return ["DELIVERED"].includes(delivery.status);
-        } else if (statusFilter === "canceled") {
-          return ["CANCELED", "FAILED"].includes(delivery.status);
-        }
-        return true;
-      });
-    }
-    
-    // Search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        delivery =>
-          delivery.id.toLowerCase().includes(term) ||
-          delivery.customer.name.toLowerCase().includes(term) ||
-          delivery.dropoffLocation.address.toLowerCase().includes(term)
-      );
-    }
-    
-    return filtered;
-  };
-
-  const generateRouteFromDeliveries = (deliveries: Delivery[]) => {
-    if (!deliveries || deliveries.length === 0) return undefined;
-
-    // Find active deliveries
-    const activeDeliveries = deliveries.filter(d => 
-      ["ASSIGNED", "PICKED_UP", "IN_TRANSIT"].includes(d.status)
-    );
-
-    if (activeDeliveries.length === 0) return undefined;
-
-    // Sort deliveries by estimated delivery time
-    const sortedDeliveries = [...activeDeliveries].sort((a, b) => 
-      new Date(a.estimatedDeliveryTime).getTime() - new Date(b.estimatedDeliveryTime).getTime()
-    );
-
-    // Use the first delivery's pickup location as the starting point
-    const pickupPoint = {
-      id: 'pickup',
-      address: sortedDeliveries[0].pickupLocation.address,
-      latitude: sortedDeliveries[0].pickupLocation.latitude,
-      longitude: sortedDeliveries[0].pickupLocation.longitude,
-      sequenceNumber: 1,
-      status: 'PICKUP',
-      customerName: 'Teslim Alım Noktası'
-    };
-
-    // Convert deliveries to route points
-    const deliveryPoints = sortedDeliveries.map((delivery, index) => ({
-      id: delivery.id,
-      address: delivery.dropoffLocation.address,
-      latitude: delivery.dropoffLocation.latitude,
-      longitude: delivery.dropoffLocation.longitude,
-      sequenceNumber: index + 2, // Start from 2 (after pickup)
-      status: delivery.status,
-      customerName: delivery.customer.name,
-      estimatedArrival: formatTime(delivery.estimatedDeliveryTime)
-    }));
-
-    return {
-      courierId: 'current-courier',
-      courierName: 'Kurye',
-      deliveryPoints: [pickupPoint, ...deliveryPoints],
-      totalDistance: sortedDeliveries.reduce((sum, delivery) => sum + delivery.distance, 0),
-      totalDuration: sortedDeliveries.reduce((sum, delivery) => sum + delivery.duration, 0),
-      lastUpdated: format(new Date(), 'dd MMMM yyyy HH:mm', { locale: tr })
-    };
-  };
-
   const handleViewAllOnMap = () => {
     setShowRouteView(true);
   };
@@ -387,12 +425,13 @@ export default function CourierDeliveries() {
 
   const handleRefreshRoute = () => {
     setIsRefreshing(true);
-    fetchDeliveries();
+    fetchRouteData();
   };
 
   const handleCenterMap = () => {
-    // This would trigger the map to recenter - handled in the RouteMap component
-    console.log('Center map requested');
+    if (courierPosition) {
+      setShouldRecenterMap(true);
+    }
   };
 
   const handleToggleView = () => {
@@ -426,6 +465,8 @@ export default function CourierDeliveries() {
               loading={loading}
               onDeliveryPointClick={handleDeliveryClick}
               className="h-full"
+              shouldRecenter={shouldRecenterMap}
+              onRecentered={() => setShouldRecenterMap(false)}
             />
           </div>
         );
@@ -448,6 +489,8 @@ export default function CourierDeliveries() {
                 loading={loading}
                 onDeliveryPointClick={handleDeliveryClick}
                 className="h-full"
+                shouldRecenter={shouldRecenterMap}
+                onRecentered={() => setShouldRecenterMap(false)}
               />
             </div>
             <div className="lg:col-span-2 h-full overflow-auto">
@@ -619,7 +662,7 @@ export default function CourierDeliveries() {
                                   </div>
                                   <div className="flex items-center space-x-2">
                                     <button
-                                      onClick={(e) => handleDeliveryClick(delivery.id)}
+                                      onClick={() => handleDeliveryClick(delivery.id)}
                                       className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                                       title="Yol Tarifi Al"
                                     >
@@ -627,7 +670,7 @@ export default function CourierDeliveries() {
                                     </button>
                                     
                                     <button
-                                      onClick={(e) => handleDeliveryClick(delivery.id)}
+                                      onClick={() => handleDeliveryClick(delivery.id)}
                                       className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
                                       title="Teslim Edildi"
                                     >

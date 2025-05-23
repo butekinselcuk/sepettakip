@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
 
 /**
  * Health check endpoint
@@ -10,44 +8,35 @@ const prisma = new PrismaClient();
  */
 export async function GET() {
   try {
-    // Veritabanı bağlantı kontrolü
-    await prisma.$queryRaw`SELECT 1`;
+    // Veritabanı bağlantısını kontrol et
+    const dbCheck = await prisma.$queryRaw`SELECT 1 as db_health`;
     
-    // Sistem sağlık bilgilerini topla
-    const uptime = process.uptime();
-    const memoryUsage = process.memoryUsage();
+    // Çevre değişkenlerini topla
     const environment = process.env.NODE_ENV || 'development';
+    const version = process.env.APP_VERSION || '1.0.0';
     
-    // Yanıt verileri
-    const healthData = {
-      status: 'ok',
+    // Yanıt objesi oluştur
+    const healthStatus = {
+      status: 'healthy',
       timestamp: new Date().toISOString(),
-      uptime: `${Math.floor(uptime / 60)} minutes, ${Math.floor(uptime % 60)} seconds`,
-      database: 'connected',
       environment,
-      memory: {
-        rss: `${Math.round(memoryUsage.rss / 1024 / 1024)} MB`,
-        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)} MB`,
-        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)} MB`,
-      },
+      version,
+      database: dbCheck ? 'connected' : 'disconnected',
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
     };
-
-    return NextResponse.json(healthData);
+    
+    return NextResponse.json(healthStatus, { status: 200 });
   } catch (error) {
     console.error('Health check failed:', error);
     
-    // Hata durumunda 500 kodu ile yanıt ver
     return NextResponse.json(
       { 
-        status: 'error', 
-        message: 'Health check failed', 
-        timestamp: new Date().toISOString(),
-        error: process.env.NODE_ENV === 'development' ? error : 'Internal server error'
+        status: 'unhealthy', 
+        error: 'Service unavailable',
+        timestamp: new Date().toISOString() 
       }, 
       { status: 500 }
     );
-  } finally {
-    // Prisma bağlantısını kapat
-    await prisma.$disconnect();
   }
 } 

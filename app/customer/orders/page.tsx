@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import axios from "axios";
-import { format } from "date-fns";
+import { format, parseISO, formatDistanceToNow } from "date-fns";
 import { tr } from "date-fns/locale";
 import Link from "next/link";
 import {
@@ -24,7 +24,14 @@ import {
   FileText,
   Info,
   Star,
-  RefreshCw
+  RefreshCw,
+  Calendar as CalendarIcon,
+  DollarSign,
+  Building,
+  ArrowDownUp,
+  Repeat,
+  ListFilter,
+  History
 } from "lucide-react";
 import Header from "@/components/Header";
 import OrderCard from "@/app/components/customer/OrderCard";
@@ -151,133 +158,12 @@ export default function CustomerOrders() {
     } catch (error) {
       console.error("Siparişler alınırken hata:", error);
       
-      // Hata durumunda kullanıcı deneyimini korumak için mock veri göster
-      if (!activeOrders.length && !pastOrders.length) {
-        createMockOrders();
-      }
-      
       setError("Siparişler yüklenemedi. Lütfen daha sonra tekrar deneyin.");
       setLoading(false);
       setRefreshing(false);
     }
   };
   
-  // Create mock data for development
-  const createMockOrders = () => {
-    const mockActiveOrders: Order[] = [
-      {
-        id: "ord1",
-        status: "PREPARING",
-        totalPrice: 85.50,
-        address: "Bağdat Caddesi No:123, Kadıköy, İstanbul",
-        notes: "Kapıda zili çalın, lütfen.",
-        items: [
-          { id: "i1", name: "Köfte Burger", quantity: 2, price: 45 },
-          { id: "i2", name: "Patates Kızartması", quantity: 1, price: 15 }
-        ],
-        estimatedDelivery: new Date(Date.now() + 45 * 60000).toISOString(),
-        actualDelivery: null,
-        createdAt: new Date(Date.now() - 30 * 60000).toISOString(),
-        updatedAt: new Date(Date.now() - 15 * 60000).toISOString(),
-        business: {
-          id: "b1",
-          name: "Burger Dünyası",
-          logoUrl: "https://via.placeholder.com/150",
-          address: "Bağdat Caddesi No:100, Kadıköy, İstanbul"
-        }
-      },
-      {
-        id: "ord2",
-        status: "IN_TRANSIT",
-        totalPrice: 120.75,
-        address: "Acıbadem Mahallesi, Üsküdar, İstanbul",
-        notes: null,
-        items: [
-          { id: "i3", name: "Karışık Pizza", quantity: 1, price: 89 },
-          { id: "i4", name: "Cola", quantity: 2, price: 15.50 }
-        ],
-        estimatedDelivery: new Date(Date.now() + 15 * 60000).toISOString(),
-        actualDelivery: null,
-        createdAt: new Date(Date.now() - 60 * 60000).toISOString(),
-        updatedAt: new Date(Date.now() - 10 * 60000).toISOString(),
-        business: {
-          id: "b2",
-          name: "Pizza Palace",
-          logoUrl: "https://via.placeholder.com/150",
-          address: "Acıbadem Caddesi No:50, Üsküdar, İstanbul"
-        },
-        courier: {
-          id: "c1",
-          user: {
-            name: "Ahmet Yılmaz",
-            email: "ahmet@example.com"
-          },
-          phone: "+90 555 123 4567",
-          currentLatitude: 40.9762,
-          currentLongitude: 29.0520
-        }
-      }
-    ];
-
-    const mockPastOrders: Order[] = [
-      {
-        id: "ord3",
-        status: "DELIVERED",
-        totalPrice: 67.25,
-        address: "Kozyatağı Mahallesi, Kadıköy, İstanbul",
-        notes: null,
-        items: [
-          { id: "i5", name: "Tavuk Döner", quantity: 1, price: 45 },
-          { id: "i6", name: "Ayran", quantity: 2, price: 11 }
-        ],
-        estimatedDelivery: new Date(Date.now() - 2 * 24 * 60 * 60000).toISOString(),
-        actualDelivery: new Date(Date.now() - 2 * 24 * 60 * 60000 + 30 * 60000).toISOString(),
-        createdAt: new Date(Date.now() - 2 * 24 * 60 * 60000 - 60 * 60000).toISOString(),
-        updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60000 + 30 * 60000).toISOString(),
-        business: {
-          id: "b3",
-          name: "Döner King",
-          logoUrl: "https://via.placeholder.com/150",
-          address: "Kozyatağı Caddesi No:25, Kadıköy, İstanbul"
-        },
-        courier: {
-          id: "c2",
-          user: {
-            name: "Mehmet Demir",
-            email: "mehmet@example.com"
-          },
-          phone: "+90 555 765 4321",
-          currentLatitude: 40.9792,
-          currentLongitude: 29.0546
-        }
-      },
-      {
-        id: "ord4",
-        status: "CANCELLED",
-        totalPrice: 105.00,
-        address: "Caddebostan Mahallesi, Kadıköy, İstanbul",
-        notes: "Kredi kartı ile ödeme yapılacak.",
-        items: [
-          { id: "i7", name: "Sushi Set", quantity: 1, price: 95 },
-          { id: "i8", name: "Su", quantity: 2, price: 5 }
-        ],
-        estimatedDelivery: new Date(Date.now() - 7 * 24 * 60 * 60000).toISOString(),
-        actualDelivery: null,
-        createdAt: new Date(Date.now() - 7 * 24 * 60 * 60000 - 2 * 60 * 60000).toISOString(),
-        updatedAt: new Date(Date.now() - 7 * 24 * 60 * 60000 - 60 * 60000).toISOString(),
-        business: {
-          id: "b4",
-          name: "Sushi House",
-          logoUrl: "https://via.placeholder.com/150",
-          address: "Caddebostan Caddesi No:75, Kadıköy, İstanbul"
-        }
-      }
-    ];
-    
-    setActiveOrders(mockActiveOrders);
-    setPastOrders(mockPastOrders);
-  };
-
   const handleOrderClick = (orderId: string) => {
     router.push(`/customer/orders/${orderId}`);
   };
@@ -489,6 +375,19 @@ export default function CustomerOrders() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header />
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+          <h1 className="text-2xl font-semibold text-gray-900 mb-2 sm:mb-0">Siparişlerim</h1>
+          
+          <Link 
+            href="/customer/orders/history" 
+            className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800"
+          >
+            <History size={16} className="mr-1" />
+            Sipariş Geçmişim
+          </Link>
+        </div>
+      </div>
       
       <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         <div className="md:flex md:items-center md:justify-between mb-6">

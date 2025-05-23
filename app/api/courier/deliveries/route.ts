@@ -1,291 +1,348 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyJWT } from '@/lib/auth';
-import { Status } from '@prisma/client';
+import { deliveryFilterSchema, deliveryStatusUpdateSchema } from '@/lib/validations/delivery';
+import { getTokenData } from '@/lib/auth';
+import { JWTPayload } from '@/lib/validations/auth';
+import { verifyJwtToken } from '@/lib/auth';
 
-// Define an interface for delivery types
-interface DeliveryData {
-  id: string;
-  status: string;
-  createdAt: Date;
-  updatedAt: Date;
-  estimatedDelivery: Date;
-  actualDelivery?: Date | null;
-  customerName: string;
-  customerPhone: string;
-  deliveryAddress: string;
-  businessName: string;
-  items: any[];
-  totalPrice: number;
-  estimatedDuration: number;
-  deliveryLatitude?: number;
-  deliveryLongitude?: number;
-  completedAt?: Date | null;
-}
-
-// GET: Kurye teslimatlarını getir
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    // JWT token'ı doğrula
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    
+    // Token doğrulama
+    const token = request.headers.get('authorization')?.split(' ')[1] || 
+                  request.cookies.get('token')?.value;
+
     if (!token) {
       return NextResponse.json(
-        { error: "Yetkilendirme token'ı eksik" },
+        { error: 'Yetkilendirme başarısız: Token bulunamadı' },
         { status: 401 }
       );
     }
 
-    const decodedToken = await verifyJWT(token);
+    const decodedToken = await verifyJwtToken(token);
     
-    if (!decodedToken) {
+    if (!decodedToken || !decodedToken.userId) {
       return NextResponse.json(
-        { error: "Geçersiz token" },
+        { error: 'Yetkilendirme başarısız: Geçersiz token' },
         { status: 401 }
       );
     }
 
-    // Kullanıcının rolünü kontrol et
-    if (decodedToken.role !== "COURIER") {
+    // Kullanıcı courier mi kontrolü
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken.userId },
+      include: { courier: true }
+    });
+
+    if (!user || user.role !== 'COURIER' || !user.courier) {
       return NextResponse.json(
-        { error: "Bu işlem için yetkiniz yok" },
+        { error: 'Yetkilendirme başarısız: Kurye erişimi gerekiyor' },
         { status: 403 }
       );
     }
 
-    const courierId = decodedToken.userId;
-
+    const courierId = user.courier.id;
+    
     // URL parametrelerini al
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get("status");
-    const startDate = searchParams.get("startDate");
-    const endDate = searchParams.get("endDate");
-    const page = parseInt(searchParams.get("page") || "1");
-    const limit = parseInt(searchParams.get("limit") || "50");
+    const status = searchParams.get('status');
+    const limit = parseInt(searchParams.get('limit') || '10');
+    const page = parseInt(searchParams.get('page') || '1');
     const skip = (page - 1) * limit;
-
+    
     // Filtreleme koşullarını oluştur
-    const where: any = {
+    const where = {
       courierId: courierId,
+      ...(status ? { status } : {})
     };
-
-    // Durum filtresi
-    if (status) {
-      where.status = status;
-    }
-
-    // Tarih filtresi
-    if (startDate && endDate) {
-      where.assignedAt = {
-        gte: new Date(startDate),
-        lte: new Date(endDate),
-      };
-    } else if (startDate) {
-      where.assignedAt = {
-        gte: new Date(startDate),
-      };
-    } else if (endDate) {
-      where.assignedAt = {
-        lte: new Date(endDate),
-      };
-    }
-
+    
     // Teslimatları getir
     const deliveries = await prisma.delivery.findMany({
       where,
-      orderBy: {
-        createdAt: "desc",
-      },
-      skip,
-      take: limit,
       include: {
-        customer: {
+            customer: {
           include: {
-            user: true
+                user: {
+              select: {
+                name: true,
+                email: true
+              }
+            }
+          }
+        },
+        order: {
+          include: {
+            business: true
           }
         }
       },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      skip,
+      take: limit
     });
-
+    
     // Toplam teslimat sayısını getir
-    const totalDeliveries = await prisma.delivery.count({
-      where,
-    });
-
-    // Yanıtı formatla
-    const formattedDeliveries = deliveries.map((delivery) => ({
-      id: delivery.id,
-      status: delivery.status,
-      assignedAt: delivery.assignedAt || delivery.createdAt,
-      estimatedDeliveryTime: delivery.estimatedArrival,
-      actualDeliveryTime: delivery.deliveredAt,
-      distance: delivery.distance || 0,
-      actualDistance: delivery.actualDistance || 0,
-      duration: delivery.duration || 0,
-      actualDuration: delivery.actualDuration || 0,
-      pickupLocation: {
-        // Teslimat noktası bilgileri - İleride gerçek veri ile değiştirilecek
-        address: "Teslimat Noktası",
-        latitude: 0,
-        longitude: 0,
-      },
-      dropoffLocation: {
-        address: delivery.customer?.address || "",
-        latitude: delivery.customer?.latitude || 0,
-        longitude: delivery.customer?.longitude || 0,
-      },
-      customer: {
-        id: delivery.customer?.id || "",
-        name: delivery.customer?.user?.name || "",
-        phone: delivery.customer?.phone || "",
-      },
-    }));
-
+    const totalDeliveries = await prisma.delivery.count({ where });
+    
     return NextResponse.json({
-      deliveries: formattedDeliveries,
+      deliveries,
       pagination: {
         total: totalDeliveries,
         page,
         limit,
-        pages: Math.ceil(totalDeliveries / limit),
-      },
+        pages: Math.ceil(totalDeliveries / limit)
+      }
     });
   } catch (error) {
-    console.error("Teslimat verileri getirme hatası:", error);
+    console.error('Teslimatları getirirken hata:', error);
     return NextResponse.json(
-      { error: "Teslimat verileri alınırken bir hata oluştu" },
+      { error: 'Teslimatlar alınırken bir hata oluştu' },
       { status: 500 }
     );
   }
 }
 
 // PUT: Teslimat durumunu güncelle
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    // JWT token'ı doğrula
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    
+    // Token doğrulama
+    const token = request.headers.get('authorization')?.split(' ')[1] || 
+                  request.cookies.get('token')?.value;
+
     if (!token) {
       return NextResponse.json(
-        { error: "Yetkilendirme token'ı eksik" },
+        { error: 'Yetkilendirme başarısız: Token bulunamadı' },
         { status: 401 }
       );
     }
 
-    const decodedToken = await verifyJWT(token);
+    const decodedToken = await verifyJwtToken(token);
     
-    if (!decodedToken) {
+    if (!decodedToken || !decodedToken.userId) {
       return NextResponse.json(
-        { error: "Geçersiz token" },
+        { error: 'Yetkilendirme başarısız: Geçersiz token' },
         { status: 401 }
       );
     }
-
-    // Kullanıcının rolünü kontrol et
-    if (decodedToken.role !== "COURIER") {
+    
+    // Kullanıcı courier mi kontrolü
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken.userId },
+      include: { courier: true }
+    });
+    
+    if (!user || user.role !== 'COURIER' || !user.courier) {
       return NextResponse.json(
-        { error: "Bu işlem için yetkiniz yok" },
+        { error: 'Yetkilendirme başarısız: Kurye erişimi gerekiyor' },
         { status: 403 }
       );
     }
-
-    const courierId = decodedToken.userId;
     
-    // URL ve request body'den veri al
-    const { searchParams } = new URL(request.url);
-    const deliveryId = searchParams.get("id");
+    const courierId = user.courier.id;
     
-    if (!deliveryId) {
-      return NextResponse.json(
-        { error: "Teslimat ID'si belirtilmedi" },
-        { status: 400 }
-      );
-    }
-    
+    // Request verilerini al
     const body = await request.json();
     
-    if (!body.status) {
+    // Teslimat ID'si kontrol et
+    if (!body.id) {
       return NextResponse.json(
-        { error: "Teslimat durumu belirtilmedi" },
+        { error: 'Teslimat ID\'si belirtilmedi' },
         { status: 400 }
       );
     }
-
-    // Geçerli teslimat durumlarını kontrol et
-    const validStatuses = ["ASSIGNED", "PICKED_UP", "IN_TRANSIT", "DELIVERED", "FAILED"];
     
-    if (!validStatuses.includes(body.status)) {
-      return NextResponse.json(
-        { error: "Geçersiz teslimat durumu" },
-        { status: 400 }
-      );
-    }
-
-    // Teslimatın mevcut durumunu kontrol et
+    // Teslimatın kuryeye ait olduğunu kontrol et
     const existingDelivery = await prisma.delivery.findUnique({
-      where: {
-        id: deliveryId,
-      },
+      where: { id: body.id }
     });
-
+    
     if (!existingDelivery) {
       return NextResponse.json(
-        { error: "Teslimat bulunamadı" },
+        { error: 'Teslimat bulunamadı' },
         { status: 404 }
       );
     }
-
+    
     if (existingDelivery.courierId !== courierId) {
       return NextResponse.json(
-        { error: "Bu teslimatı güncelleme yetkiniz yok" },
+        { error: 'Bu teslimatı güncelleme yetkiniz yok' },
         { status: 403 }
       );
     }
-
-    // Duruma göre ek veri hazırla
-    const updateData: any = {
-      status: body.status,
-    };
-
-    // Teslimat tamamlandıysa teslim tarihini ekle
-    if (body.status === "DELIVERED") {
-      updateData.deliveredAt = new Date();
+    
+    // Güncelleme verilerini hazırla
+    const updateData: any = {};
+    
+    if (body.status) {
+      updateData.status = body.status;
+      
+      // Duruma göre timestamp güncelle
+      if (body.status === 'PICKED_UP') {
+        updateData.pickedUpAt = new Date();
+      } else if (body.status === 'DELIVERED') {
+        updateData.deliveredAt = new Date();
+      }
     }
-
+    
+    if (body.notes) updateData.notes = body.notes;
+    if (body.actualDistance) updateData.actualDistance = body.actualDistance;
+    
+    // Konum bilgisi varsa güncelle
+    if (body.currentLatitude && body.currentLongitude) {
+      await prisma.courier.update({
+        where: { id: courierId },
+        data: {
+          currentLatitude: body.currentLatitude,
+          currentLongitude: body.currentLongitude
+        }
+      });
+    }
+    
     // Teslimatı güncelle
     const updatedDelivery = await prisma.delivery.update({
-      where: {
-        id: deliveryId,
-      },
-      data: updateData,
+      where: { id: body.id },
+      data: updateData
     });
-
-    // Yanıtı formatla
+    
+    // Teslimat tamamlandıysa siparişi de güncelle
+    if (body.status === 'DELIVERED' && updatedDelivery.orderId) {
+      await prisma.order.update({
+        where: { id: updatedDelivery.orderId },
+        data: { status: 'DELIVERED' }
+      });
+      
+      // Bildirimleri oluştur
+      // Müşteriye bildirim
+      const customer = await prisma.customer.findUnique({
+        where: { id: updatedDelivery.customerId },
+        select: { userId: true }
+      });
+      
+      if (customer) {
+        await prisma.notification.create({
+        data: {
+            type: 'ORDER_DELIVERED',
+            title: 'Siparişiniz Teslim Edildi',
+            message: `Siparişiniz başarıyla teslim edildi.`,
+            isRead: false,
+            userId: customer.userId
+          }
+        });
+      }
+      
+      // İşletmeye bildirim
+      const order = await prisma.order.findUnique({
+        where: { id: updatedDelivery.orderId },
+        select: { 
+          businessId: true,
+          business: {
+            select: {
+              userId: true
+            }
+          }
+        }
+      });
+      
+      if (order?.business?.userId) {
+        await prisma.notification.create({
+          data: {
+            type: 'ORDER_DELIVERED',
+            title: 'Sipariş Teslim Edildi',
+            message: `${updatedDelivery.orderId} numaralı sipariş başarıyla teslim edildi.`,
+            isRead: false,
+            userId: order.business.userId
+          }
+        });
+      }
+    }
+    
     return NextResponse.json({
-      message: "Teslimat durumu güncellendi",
-      delivery: {
-        id: updatedDelivery.id,
-        status: updatedDelivery.status,
-        deliveredAt: updatedDelivery.deliveredAt,
-      },
+      success: true,
+      delivery: updatedDelivery
     });
   } catch (error) {
-    console.error("Teslimat güncelleme hatası:", error);
+    console.error('Teslimat güncellenirken hata:', error);
     return NextResponse.json(
-      { error: "Teslimat güncellenirken bir hata oluştu" },
+      { error: 'Teslimat güncellenirken bir hata oluştu' },
       { status: 500 }
     );
   }
 }
 
-// Tahmini teslimat süresini dakika cinsinden hesapla
-function calculateDuration(startDate: Date, endDate: Date | null): number {
-  if (!endDate) return 0;
-  
-  const start = new Date(startDate).getTime();
-  const end = new Date(endDate).getTime();
-  const diffMs = end - start;
-  
-  // Dakika cinsinden döndür
-  return Math.round(diffMs / (1000 * 60));
+// POST: Kuryenin konum bilgisini güncelle
+export async function POST(request: NextRequest) {
+  try {
+    // Token doğrulama
+    const token = request.headers.get('authorization')?.split(' ')[1] || 
+                  request.cookies.get('token')?.value;
+    
+    if (!token) {
+      return NextResponse.json(
+        { error: 'Yetkilendirme başarısız: Token bulunamadı' },
+        { status: 401 }
+      );
+    }
+    
+    const decodedToken = await verifyJwtToken(token);
+    
+    if (!decodedToken || !decodedToken.userId) {
+      return NextResponse.json(
+        { error: 'Yetkilendirme başarısız: Geçersiz token' },
+        { status: 401 }
+      );
+    }
+    
+    // Kullanıcı courier mi kontrolü
+    const user = await prisma.user.findUnique({
+      where: { id: decodedToken.userId },
+      include: { courier: true }
+    });
+    
+    if (!user || user.role !== 'COURIER' || !user.courier) {
+      return NextResponse.json(
+        { error: 'Yetkilendirme başarısız: Kurye erişimi gerekiyor' },
+        { status: 403 }
+      );
+    }
+    
+    const courierId = user.courier.id;
+    
+    // Request verilerini al
+    const body = await request.json();
+    
+    // Konum bilgisi kontrol et
+    if (!body.latitude || !body.longitude) {
+      return NextResponse.json(
+        { error: 'Konum bilgisi eksik' },
+        { status: 400 }
+      );
+    }
+    
+    // Kurye konumunu güncelle
+    const updatedCourier = await prisma.courier.update({
+      where: { id: courierId },
+      data: {
+        currentLatitude: body.latitude,
+        currentLongitude: body.longitude,
+        availabilityStatus: body.status || 'AVAILABLE'
+      }
+    });
+    
+    return NextResponse.json({
+      success: true,
+      courier: {
+        id: updatedCourier.id,
+        latitude: updatedCourier.currentLatitude,
+        longitude: updatedCourier.currentLongitude,
+        status: updatedCourier.availabilityStatus
+      }
+    });
+  } catch (error) {
+    console.error('Kurye konumu güncellenirken hata:', error);
+    return NextResponse.json(
+      { error: 'Konum güncellenirken bir hata oluştu' },
+      { status: 500 }
+    );
+  }
 } 

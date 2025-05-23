@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import AdminLayout from "@/app/components/layouts/AdminLayout";
-import axios from "axios";
-import { use } from "react";
+import AdminLayout from "@/app/admin/components/AdminLayout";
+import axios, { AxiosError } from "axios";
+import { useToast } from "@/app/components/ui/use-toast";
+
+// Status türleri için string literal tip
+type CourierStatus = "ACTIVE" | "INACTIVE" | "PENDING";
+type VehicleType = "MOTORCYCLE" | "CAR" | "BICYCLE" | "WALKING" | "default-value" | "";
 
 interface Courier {
   id: string;
   userId: string;
-  status: string;
+  status: CourierStatus;
   vehicleType: string | null;
   phone: string | null;
   ratings: number | null;
@@ -25,23 +29,33 @@ interface Courier {
   createdAt: string;
 }
 
+interface CourierFormData {
+  vehicleType: string;
+  phone: string;
+  status: CourierStatus;
+}
+
 export default function CourierDetail({ params }: { params: { id: string } }) {
   const router = useRouter();
-  const courierId = use(Promise.resolve(params)).id;
+  const { toast } = useToast();
   const [courier, setCourier] = useState<Courier | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CourierFormData>({
     vehicleType: "",
     phone: "",
-    status: "",
+    status: "ACTIVE",
   });
+
+  // Get courier ID from params
+  const courierId = params.id;
 
   useEffect(() => {
     const fetchCourier = async () => {
       try {
         setLoading(true);
+        setError("");
         const token = localStorage.getItem("token");
         
         if (!token) {
@@ -49,7 +63,7 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
           return;
         }
 
-        const response = await axios.get(`/api/couriers/${courierId}`, {
+        const response = await axios.get<{courier: Courier}>(`/api/couriers/${courierId}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
 
@@ -64,10 +78,9 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
         setFormData({
           vehicleType: courierData.vehicleType || "",
           phone: courierData.phone || "",
-          status: courierData.status || "ACTIVE",
+          status: courierData.status,
         });
       } catch (err) {
-        console.error("Kurye getirme hatası:", err);
         setError("Kurye bilgileri yüklenirken bir hata oluştu.");
       } finally {
         setLoading(false);
@@ -81,7 +94,7 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: name === 'status' ? value as CourierStatus : value,
     }));
   };
 
@@ -89,6 +102,7 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
     e.preventDefault();
     try {
       setSaving(true);
+      setError("");
       const token = localStorage.getItem("token");
       
       if (!token) {
@@ -108,13 +122,33 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
       );
 
       if (response.status === 200) {
-        alert("Kurye başarıyla güncellendi!");
-        // Update local state
-        setCourier(prev => prev ? {...prev, ...formData} : null);
+        toast({
+          title: "Başarılı",
+          description: "Kurye başarıyla güncellendi!"
+        } as any);
+        
+        // Update local state with the typed formData
+        if (courier) {
+          setCourier({
+            ...courier,
+            vehicleType: formData.vehicleType || null,
+            phone: formData.phone || null,
+            status: formData.status
+          });
+        }
       }
-    } catch (err: any) {
-      console.error("Kurye güncelleme hatası:", err);
-      setError(err.response?.data?.error || "Kurye güncellenirken bir hata oluştu.");
+    } catch (err) {
+      const error = err as AxiosError;
+      if (error.response?.data && typeof error.response.data === 'object' && 'error' in error.response.data) {
+        setError((error.response.data as any).error);
+      } else {
+        setError("Kurye güncellenirken bir hata oluştu.");
+      }
+      
+      toast({
+        title: "Hata",
+        description: "Kurye güncellenirken bir hata oluştu."
+      } as any);
     } finally {
       setSaving(false);
     }
@@ -214,7 +248,7 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
                           onChange={handleChange}
                           className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                         >
-                          <option value="">Seçiniz</option>
+                          <option value="default-value">Seçiniz</option>
                           <option value="MOTORCYCLE">Motorsiklet</option>
                           <option value="CAR">Araba</option>
                           <option value="BICYCLE">Bisiklet</option>
@@ -251,18 +285,20 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
                       </div>
                     </div>
                     
-                    <div className="mt-6 flex items-center justify-end space-x-3">
+                    <div className="mt-6 flex justify-end">
                       <button
                         type="button"
                         onClick={() => router.push("/admin/couriers")}
-                        className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        className="mr-3 inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                       >
-                        Geri Dön
+                        İptal
                       </button>
                       <button
                         type="submit"
                         disabled={saving}
-                        className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${saving ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white ${
+                          saving ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'
+                        } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500`}
                       >
                         {saving ? (
                           <>
@@ -279,13 +315,14 @@ export default function CourierDetail({ params }: { params: { id: string } }) {
                 </div>
               </div>
             ) : (
-              <div className="text-center py-10">
-                <p className="text-red-500">Kurye bulunamadı.</p>
+              <div className="bg-white shadow overflow-hidden sm:rounded-lg p-6 text-center">
+                <p className="text-red-500">Kurye bilgileri bulunamadı veya bir hata oluştu.</p>
                 <button
-                  onClick={() => router.push("/admin/couriers")}
-                  className="mt-4 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  type="button"
+                  onClick={() => router.push('/admin/couriers')}
+                  className="mt-4 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                 >
-                  Kurye Listesine Dön
+                  Kuryeler Listesine Dön
                 </button>
               </div>
             )}

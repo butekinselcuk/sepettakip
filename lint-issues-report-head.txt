@@ -1,0 +1,100 @@
+
+D:\sepet\app\admin\components\AdminLayout.tsx
+  51:10  error  'userRole' is assigned a value but never used              @typescript-eslint/no-unused-vars
+  51:20  error  'setUserRole' is assigned a value but never used           @typescript-eslint/no-unused-vars
+  52:29  error  'setNotificationCount' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+D:\sepet\app\admin\couriers\[id]\page.tsx
+  122:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\couriers\add\page.tsx
+  109:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\couriers\page.tsx
+  77:19  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  90:6   warning  React Hook useEffect has a missing dependency: 'fetchCouriers'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\sepet\app\admin\dashboard\page.tsx
+   7:3   error  'Store' is defined but never used                               @typescript-eslint/no-unused-vars
+   9:3   error  'Calendar' is defined but never used                            @typescript-eslint/no-unused-vars
+  10:3   error  'Map' is defined but never used                                 @typescript-eslint/no-unused-vars
+  12:3   error  'ArrowDown' is defined but never used                           @typescript-eslint/no-unused-vars
+  14:3   error  'Truck' is defined but never used                               @typescript-eslint/no-unused-vars
+  17:3   error  'CalendarRange' is defined but never used                       @typescript-eslint/no-unused-vars
+  20:8   error  'axios' is defined but never used                               @typescript-eslint/no-unused-vars
+  56:21  error  'setDateRange' is assigned a value but never used               @typescript-eslint/no-unused-vars
+  58:10  error  'orderTimeSeriesData' is assigned a value but never used        @typescript-eslint/no-unused-vars
+  58:31  error  'setOrderTimeSeriesData' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  59:10  error  'revenueTimeSeriesData' is assigned a value but never used      @typescript-eslint/no-unused-vars
+  59:33  error  'setRevenueTimeSeriesData' is assigned a value but never used   @typescript-eslint/no-unused-vars
+  60:10  error  'orderStatusData' is assigned a value but never used            @typescript-eslint/no-unused-vars
+  60:27  error  'setOrderStatusData' is assigned a value but never used         @typescript-eslint/no-unused-vars
+  61:10  error  'businessCategoryData' is assigned a value but never used       @typescript-eslint/no-unused-vars
+  61:32  error  'setBusinessCategoryData' is assigned a value but never used    @typescript-eslint/no-unused-vars
+  62:10  error  'courierPerformanceData' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  62:34  error  'setCourierPerformanceData' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  62:72  error  Unexpected any. Specify a different type                        @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\email\page.tsx
+   4:46  error    'CardFooter' is defined but never used                                                                            @typescript-eslint/no-unused-vars
+  10:10  error    'Select' is defined but never used                                                                                @typescript-eslint/no-unused-vars
+  10:18  error    'SelectContent' is defined but never used                                                                         @typescript-eslint/no-unused-vars
+  10:33  error    'SelectItem' is defined but never used                                                                            @typescript-eslint/no-unused-vars
+  10:45  error    'SelectTrigger' is defined but never used                                                                         @typescript-eslint/no-unused-vars
+  10:60  error    'SelectValue' is defined but never used                                                                           @typescript-eslint/no-unused-vars
+  12:16  error    'LockKeyhole' is defined but never used                                                                           @typescript-eslint/no-unused-vars
+  36:10  error    'activeTab' is assigned a value but never used                                                                    @typescript-eslint/no-unused-vars
+  59:10  error    'templates' is assigned a value but never used                                                                    @typescript-eslint/no-unused-vars
+  60:10  error    'selectedTemplate' is assigned a value but never used                                                             @typescript-eslint/no-unused-vars
+  60:28  error    'setSelectedTemplate' is assigned a value but never used                                                          @typescript-eslint/no-unused-vars
+  65:6   warning  React Hook useEffect has a missing dependency: 'fetchSettings'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\sepet\app\admin\email\templates\[id]\page.tsx
+    3:38  error    'useCallback' is defined but never used                                                                           @typescript-eslint/no-unused-vars
+    5:46  error    'CardFooter' is defined but never used                                                                            @typescript-eslint/no-unused-vars
+   12:10  error    'Separator' is defined but never used                                                                             @typescript-eslint/no-unused-vars
+   40:3   error    'DialogTrigger' is defined but never used                                                                         @typescript-eslint/no-unused-vars
+  109:6   warning  React Hook useEffect has a missing dependency: 'fetchTemplate'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  322:68  error    Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\email\templates\page.tsx
+    5:46   error    'CardFooter' is defined but never used                                                                             @typescript-eslint/no-unused-vars
+    6:10   error    'Tabs' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+    6:16   error    'TabsContent' is defined but never used                                                                            @typescript-eslint/no-unused-vars
+    6:29   error    'TabsList' is defined but never used                                                                               @typescript-eslint/no-unused-vars
+    6:39   error    'TabsTrigger' is defined but never used                                                                            @typescript-eslint/no-unused-vars
+   11:10   error    'Separator' is defined but never used                                                                              @typescript-eslint/no-unused-vars
+   12:119  error    'Send' is defined but never used                                                                                   @typescript-eslint/no-unused-vars
+   28:3    error    'TableCaption' is defined but never used                                                                           @typescript-eslint/no-unused-vars
+   78:6    warning  React Hook useEffect has a missing dependency: 'fetchTemplates'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  197:13   error    'data' is assigned a value but never used                                                                          @typescript-eslint/no-unused-vars
+
+D:\sepet\app\admin\kurye\page.tsx
+  41:72  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\orders\detail\[id]\page.tsx
+   71:44  error    Unexpected any. Specify a different type                                                                              @typescript-eslint/no-explicit-any
+   91:19  error    Unexpected any. Specify a different type                                                                              @typescript-eslint/no-explicit-any
+  116:6   warning  React Hook useEffect has a missing dependency: 'fetchOrderDetails'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  124:25  error    Unexpected any. Specify a different type                                                                              @typescript-eslint/no-explicit-any
+  142:19  error    Unexpected any. Specify a different type                                                                              @typescript-eslint/no-explicit-any
+  165:19  error    Unexpected any. Specify a different type                                                                              @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\orders\page.tsx
+  60:21  error    Unexpected any. Specify a different type                                                                        @typescript-eslint/no-explicit-any
+  70:6   warning  React Hook useEffect has a missing dependency: 'fetchOrders'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\sepet\app\admin\reports\[id]\page.tsx
+  17:15  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\reports\create\page.tsx
+  75:19  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+D:\sepet\app\admin\reports\page.tsx
+    7:46  error    'CardFooter' is defined but never used                                                                                                       @typescript-eslint/no-unused-vars
+    9:10  error    'Input' is defined but never used                                                                                                            @typescript-eslint/no-unused-vars
+   10:10  error    'Label' is defined but never used                                                                                                            @typescript-eslint/no-unused-vars
+   11:10  error    'Select' is defined but never used                                                                                                           @typescript-eslint/no-unused-vars
+   11:18  error    'SelectContent' is defined but never used                                                                                                    @typescript-eslint/no-unused-vars
+   11:33  error    'SelectItem' is defined but never used                                                                                                       @typescript-eslint/no-unused-vars
+   11:45  error    'SelectTrigger' is defined but never used                                                                                                    @typescript-eslint/no-unused-vars

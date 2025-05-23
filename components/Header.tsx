@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import axios from 'axios';
 import { LogOut, User, Package, ShoppingCart, BarChart2, Settings, Menu, ArrowLeft } from 'lucide-react';
+import { useAuth } from './AuthProvider';
+import { isAuthenticated, getUser } from '@/lib/auth-utils';
 
 interface UserInfo {
   id: string;
@@ -16,89 +18,37 @@ interface UserInfo {
 export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
-  const [user, setUser] = useState<UserInfo | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { user, isLoading, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [localUser, setLocalUser] = useState<UserInfo | null>(null);
 
+  // İlk yükleme ve navigasyon sonrası kullanıcı bilgisini kontrol et
   useEffect(() => {
-    const fetchUserInfo = async () => {
-      const token = localStorage.getItem("token");
-      
-      if (!token) {
-        console.log("Token bulunamadı, login sayfasına yönlendiriliyor");
-        router.push("/auth/login");
-        return;
+    // Auth Context'ten user gelmemişse localStorage'dan kontrol et
+    if (!user && !isLoading && isAuthenticated()) {
+      const localStorageUser = getUser();
+      if (localStorageUser) {
+        setLocalUser(localStorageUser);
       }
-
-      try {
-        // Kullanıcı bilgilerini localStorage'dan al
-        const storedUser = localStorage.getItem("user");
-        
-        if (storedUser) {
-          try {
-            const parsedUser = JSON.parse(storedUser);
-            setUser(parsedUser);
-            setIsLoading(false);
-            console.log("Header - Kullanıcı localStorage'dan yüklendi:", parsedUser.email, parsedUser.role);
-          } catch (e) {
-            console.error('Kullanıcı verisi çözümlenirken hata:', e);
-            // localStorage'dan alınamadıysa API'den al
-            await fetchFromApi(token);
-          }
-        } else {
-          // localStorage'da user yoksa API'den al
-          await fetchFromApi(token);
-        }
-      } catch (error: any) {
-        console.error('Kullanıcı bilgisi alınamadı:', error);
-        
-        // Token geçersizse login sayfasına yönlendir
-        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-          handleLogout();
-        }
-        
-        setIsLoading(false);
-      }
-    };
-
-    const fetchFromApi = async (token: string) => {
-      try {
-        const response = await axios.get('/api/auth/me', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        
-        setUser(response.data.user);
-        // Kullanıcı verisini localStorage'a kaydet
-        localStorage.setItem('user', JSON.stringify(response.data.user));
-        console.log("Header - Kullanıcı API'den yüklendi:", response.data.user.email, response.data.user.role);
-      } catch (error) {
-        console.error('API\'den kullanıcı bilgisi alınamadı:', error);
-        throw error;
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchUserInfo();
-  }, [router]);
-
-  const handleLogout = async () => {
-    try {
-      await axios.post('/api/auth/logout');
-    } catch (error) {
-      console.error('Çıkış yapılırken hata:', error);
-    } finally {
-      // Client-side oturumu temizle
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      
-      // Login sayfasına yönlendir
-      router.push('/auth/login');
+    } else if (user) {
+      setLocalUser(user);
     }
-  };
+  }, [user, isLoading, pathname]);
+
+  // Header görüntülenmeden önce kullanıcı durumunu doğrula
+  useEffect(() => {
+    if (!user && !isLoading && isAuthenticated()) {
+      try {
+        const storedUser = getUser();
+        if (storedUser) {
+          setLocalUser(storedUser);
+        }
+      } catch (error) {
+        console.error('Kullanıcı bilgisi alınamadı:', error);
+      }
+    }
+  }, []);
 
   const handleBack = () => {
     router.back();
@@ -107,6 +57,50 @@ export default function Header() {
   const toggleUserMenu = () => {
     setUserMenuOpen(!userMenuOpen);
   };
+
+  const handleLogout = async () => {
+    try {
+      console.log('Header: Çıkış yapılıyor...');
+      
+      // Önce API çağrısı yap
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const data = await response.json();
+      console.log('Header: Çıkış yanıtı:', data);
+      
+      // Sonra AuthContext'teki logout fonksiyonunu çağır
+      await logout();
+      
+      // En son yönlendirme yap
+      router.push('/auth/login');
+    } catch (error) {
+      console.error('Header: Çıkış hatası:', error);
+      // Hata durumunda da yönlendir
+    router.push('/auth/login');
+    }
+  };
+
+  const refreshPage = () => {
+    window.location.reload();
+  };
+
+  // Hangi kullanıcı bilgisini göstereceğimize karar ver (context veya localStorage)
+  const currentUser = user || localUser;
+
+  // Eğer path /auth/ ile başlıyorsa (login, register gibi) header'ı gösterme
+  if (pathname?.startsWith('/auth/')) {
+    return null;
+  }
+
+  // Layout sayfalarında header'ı gösterme
+  if (pathname === '/' || pathname === '/app' || pathname === '/error') {
+    return null;
+  }
 
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
@@ -141,7 +135,7 @@ export default function Header() {
 
           {/* Navigasyon - Masaüstü için */}
           <nav className="hidden md:flex space-x-8">
-            {user?.role === 'ADMIN' && (
+            {currentUser?.role === 'ADMIN' && (
               <>
                 <Link 
                   href="/admin/dashboard" 
@@ -186,7 +180,7 @@ export default function Header() {
               </>
             )}
 
-            {user?.role === 'BUSINESS' && (
+            {currentUser?.role === 'BUSINESS' && (
               <>
                 <Link 
                   href="/business/dashboard" 
@@ -215,7 +209,7 @@ export default function Header() {
               </>
             )}
 
-            {user?.role === 'COURIER' && (
+            {currentUser?.role === 'COURIER' && (
               <>
                 <Link 
                   href="/courier/dashboard" 
@@ -228,7 +222,7 @@ export default function Header() {
               </>
             )}
 
-            {user?.role === 'CUSTOMER' && (
+            {currentUser?.role === 'CUSTOMER' && (
               <>
                 <Link 
                   href="/customer/dashboard" 
@@ -251,45 +245,61 @@ export default function Header() {
           </nav>
 
           {/* Kullanıcı menüsü */}
-          {!isLoading && user && (
+          {currentUser && (
             <div className="flex items-center relative">
               <button 
                 onClick={toggleUserMenu}
                 className="relative h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 hover:bg-blue-200"
+                aria-label="Kullanıcı Menüsü"
+                title={`${currentUser.name || currentUser.email} - ${currentUser.role}`}
               >
-                {user.name?.charAt(0) || user.email?.charAt(0) || 'U'}
+                {currentUser.name?.charAt(0) || currentUser.email?.charAt(0) || 'U'}
               </button>
               
               {userMenuOpen && (
-                <div className="absolute right-0 mt-2 top-8 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5">
+                <div className="absolute right-0 mt-2 top-8 w-56 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-50">
                   <div className="p-4 border-b border-gray-100">
                     <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium leading-none">{user.name}</p>
-                      <p className="text-xs leading-none text-gray-500">{user.email}</p>
+                      <p className="text-sm font-medium leading-none">{currentUser.name}</p>
+                      <p className="text-xs leading-none text-gray-500">{currentUser.email}</p>
+                      <p className="text-xs mt-1 font-medium text-gray-500">
+                        Rol: {currentUser.role === 'ADMIN' ? 'Yönetici' : 
+                              currentUser.role === 'BUSINESS' ? 'İşletme' : 
+                              currentUser.role === 'COURIER' ? 'Kurye' : 
+                              currentUser.role === 'CUSTOMER' ? 'Müşteri' : currentUser.role}
+                      </p>
                     </div>
                   </div>
                   <div className="py-1">
                     <Link 
-                      href="/profile" 
-                      className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                      href={`/${currentUser.role.toLowerCase()}/profile`}
+                      className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => setUserMenuOpen(false)}
                     >
-                      <User className="mr-2 h-4 w-4" />
-                      <span>Profil</span>
+                      <User className="h-4 w-4 mr-2" />
+                      Profil
                     </Link>
                     <Link 
-                      href="/settings" 
-                      className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                      href={`/${currentUser.role.toLowerCase()}/settings`}
+                      className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => setUserMenuOpen(false)}
                     >
-                      <Settings className="mr-2 h-4 w-4" />
-                      <span>Ayarlar</span>
+                      <Settings className="h-4 w-4 mr-2" />
+                      Ayarlar
                     </Link>
-                    <hr className="my-1" />
-                    <button
-                      onClick={handleLogout}
-                      className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center w-full text-left"
+                    <button 
+                      onClick={refreshPage}
+                      className="flex w-full items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     >
-                      <LogOut className="mr-2 h-4 w-4" />
-                      <span>Çıkış Yap</span>
+                      <BarChart2 className="h-4 w-4 mr-2" />
+                      Yenile
+                    </button>
+                    <button 
+                      onClick={handleLogout}
+                      className="flex w-full items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                    >
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Çıkış Yap
                     </button>
                   </div>
                 </div>
@@ -299,172 +309,146 @@ export default function Header() {
         </div>
       </div>
 
-      {/* Mobil Menü */}
+      {/* Mobil menü */}
       {mobileMenuOpen && (
-        <div className="md:hidden px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-gray-200">
-          {user?.role === 'ADMIN' && (
-            <>
-              <Link 
-                href="/admin/dashboard" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/admin/dashboard') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Dashboard
-              </Link>
-              <Link 
-                href="/admin/users" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/admin/users') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Kullanıcılar
-              </Link>
-              <Link 
-                href="/admin/businesses" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/admin/businesses') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                İşletmeler
-              </Link>
-              <Link 
-                href="/admin/orders" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/admin/orders') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Siparişler
-              </Link>
-              <Link 
-                href="/admin/reports" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/admin/reports') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Raporlar
-              </Link>
-            </>
-          )}
+        <div className="md:hidden bg-white border-t border-gray-200 p-4 shadow-md">
+          <nav className="grid gap-2">
+            {currentUser?.role === 'ADMIN' && (
+              <>
+                <Link 
+                  href="/admin/dashboard" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Dashboard
+                </Link>
+                <Link 
+                  href="/admin/users" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Kullanıcılar
+                </Link>
+                <Link 
+                  href="/admin/businesses" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  İşletmeler
+                </Link>
+                <Link 
+                  href="/admin/orders" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Siparişler
+                </Link>
+                <Link 
+                  href="/admin/reports" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Raporlar
+                </Link>
+              </>
+            )}
 
-          {user?.role === 'BUSINESS' && (
-            <>
-              <Link 
-                href="/business/dashboard" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/business/dashboard') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Dashboard
-              </Link>
-              <Link 
-                href="/business/products" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/business/products') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Ürünler
-              </Link>
-              <Link 
-                href="/business/orders" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/business/orders') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Siparişler
-              </Link>
-            </>
-          )}
+            {currentUser?.role === 'BUSINESS' && (
+              <>
+                <Link 
+                  href="/business/dashboard" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Dashboard
+                </Link>
+                <Link 
+                  href="/business/products" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Ürünler
+                </Link>
+                <Link 
+                  href="/business/orders" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Siparişler
+                </Link>
+              </>
+            )}
 
-          {user?.role === 'COURIER' && (
-            <>
-              <Link 
-                href="/courier/dashboard" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/courier/dashboard') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Teslimatlar
-              </Link>
-            </>
-          )}
+            {currentUser?.role === 'COURIER' && (
+              <>
+                <Link 
+                  href="/courier/dashboard" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Teslimatlar
+                </Link>
+                <Link 
+                  href="/courier/profile" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Profil
+                </Link>
+                <Link 
+                  href="/courier/settings" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Ayarlar
+                </Link>
+              </>
+            )}
 
-          {user?.role === 'CUSTOMER' && (
-            <>
-              <Link 
-                href="/customer/dashboard" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/customer/dashboard') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Siparişlerim
-              </Link>
-              <Link 
-                href="/customer/profile" 
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  pathname?.includes('/customer/profile') 
-                    ? 'bg-blue-50 text-blue-600' 
-                    : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600'
-                }`}
-              >
-                Profilim
-              </Link>
-            </>
-          )}
+            {currentUser?.role === 'CUSTOMER' && (
+              <>
+                <Link 
+                  href="/customer/dashboard" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Siparişlerim
+                </Link>
+                <Link 
+                  href="/customer/profile" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Profil
+                </Link>
+                <Link 
+                  href="/customer/settings" 
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Ayarlar
+                </Link>
+              </>
+            )}
 
-          <div className="pt-4 pb-3 border-t border-gray-200">
-            <div className="flex items-center px-5">
-              <div className="flex-shrink-0">
-                <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                  {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
-                </div>
-              </div>
-              <div className="ml-3">
-                <div className="text-base font-medium text-gray-800">{user?.name}</div>
-                <div className="text-sm font-medium text-gray-500">{user?.email}</div>
-              </div>
-            </div>
-            <div className="mt-3 px-2 space-y-1">
-              <Link 
-                href="/profile" 
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50 hover:text-blue-600"
-              >
-                Profil
-              </Link>
-              <Link 
-                href="/settings" 
-                className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:bg-gray-50 hover:text-blue-600"
-              >
-                Ayarlar
-              </Link>
-              <button
-                onClick={handleLogout}
-                className="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-red-600 hover:bg-red-50"
-              >
-                Çıkış Yap
-              </button>
-            </div>
-          </div>
+            {currentUser && (
+              <>
+                <div className="border-t border-gray-200 my-2"></div>
+                <button 
+                  onClick={refreshPage}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md text-left"
+                >
+                  Yenile
+                </button>
+                <button 
+                  onClick={handleLogout}
+                  className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-md text-left"
+                >
+                  Çıkış Yap
+                </button>
+              </>
+            )}
+          </nav>
         </div>
       )}
     </header>

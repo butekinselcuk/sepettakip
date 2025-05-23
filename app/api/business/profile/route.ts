@@ -1,204 +1,282 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
-import { verifyJwtToken } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { verifyJWT } from '@/lib/auth';
+import { JWTPayload } from '@/lib/validations/auth';
+import { z } from 'zod';
 
-const prisma = new PrismaClient();
+// İşletme profil şeması
+const businessProfileSchema = z.object({
+  name: z.string().min(2, "İşletme adı en az 2 karakter olmalıdır"),
+  description: z.string().optional().nullable(),
+  address: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  website: z.string().optional().nullable(),
+  email: z.string().email().optional().nullable(),
+  logoUrl: z.string().url().optional().nullable(),
+  coverUrl: z.string().url().optional().nullable(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+  tax_id: z.string().optional().nullable(),
+  bank_iban: z.string().optional().nullable(),
+  openingTime: z.string().optional().nullable(),
+  closingTime: z.string().optional().nullable(),
+  deliveryRadius: z.number().min(0).optional().nullable(),
+  deliveryFee: z.number().min(0).optional().nullable(),
+  facebook: z.string().url().optional().nullable(),
+  instagram: z.string().url().optional().nullable(),
+  twitter: z.string().url().optional().nullable(),
+  type: z.string().optional().nullable(),
+  tags: z.array(z.string()).optional().nullable(),
+  features: z.array(z.string()).optional().nullable()
+});
 
-// GET endpoint to fetch business profile
+// GET: İşletme profilini getir
 export async function GET(request: NextRequest) {
   try {
-    // Get token from request headers
+    // Token doğrulama
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: 'Unauthorized: Token is missing' },
+        { error: 'Yetkilendirme token\'ı eksik' },
         { status: 401 }
       );
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = await verifyJwtToken(token);
+    const decoded = await verifyJWT(token) as JWTPayload;
 
     if (!decoded || decoded.role !== 'BUSINESS') {
       return NextResponse.json(
-        { error: 'Unauthorized: Invalid token or insufficient permissions' },
+        { error: 'Bu işlem için yetkiniz yok' },
         { status: 403 }
       );
     }
 
-    // Fetch business profile from database
+    const businessId = decoded.businessId;
+    if (!businessId) {
+      return NextResponse.json(
+        { error: 'İşletme ID\'si bulunamadı' },
+        { status: 400 }
+      );
+    }
+
+    // İşletme profilini getir
     const businessProfile = await prisma.business.findUnique({
       where: {
-        userId: decoded.userId,
+        id: businessId,
       },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        address: true,
-        description: true,
-        rating: true,
-        createdAt: true,
-        updatedAt: true,
+      include: {
         user: {
           select: {
-            email: true
+            email: true,
+            name: true
           }
         }
-      },
+      }
     });
 
     if (!businessProfile) {
       return NextResponse.json(
-        { error: 'Business profile not found' },
+        { error: 'İşletme profili bulunamadı' },
         { status: 404 }
       );
     }
 
-    // Format the response
-    const response = {
-      ...businessProfile,
-      email: businessProfile.user.email
-    } as any;
-    
-    delete response.user;
-
-    return NextResponse.json(response);
+    return NextResponse.json(businessProfile);
   } catch (error) {
-    console.error('Error fetching business profile:', error);
+    console.error('İşletme profili getirme hatası:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'İşletme profili alınırken bir hata oluştu' },
       { status: 500 }
     );
   }
 }
 
-// PUT endpoint to update business profile
+// PUT: İşletme profilini güncelle
 export async function PUT(request: NextRequest) {
   try {
-    // Get token from request headers
+    // Token doğrulama
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: 'Unauthorized: Token is missing' },
+        { error: 'Yetkilendirme token\'ı eksik' },
         { status: 401 }
       );
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = await verifyJwtToken(token);
+    const decoded = await verifyJWT(token) as JWTPayload;
 
     if (!decoded || decoded.role !== 'BUSINESS') {
       return NextResponse.json(
-        { error: 'Unauthorized: Invalid token or insufficient permissions' },
+        { error: 'Bu işlem için yetkiniz yok' },
         { status: 403 }
       );
     }
 
-    // Parse request body
-    const requestBody = await request.json();
-    
-    // Validate request data
-    const {
-      name,
-      phone,
-      address,
-      description
-    } = requestBody;
-
-    // Find the business profile
-    const business = await prisma.business.findUnique({
-      where: {
-        userId: decoded.userId,
-      },
-    });
-
-    if (!business) {
+    const businessId = decoded.businessId;
+    if (!businessId) {
       return NextResponse.json(
-        { error: 'Business profile not found' },
-        { status: 404 }
+        { error: 'İşletme ID\'si bulunamadı' },
+        { status: 400 }
       );
     }
 
-    // Update business profile
-    const updatedProfile = await prisma.business.update({
-      where: {
-        id: business.id,
-      },
-      data: {
-        name,
-        phone,
-        address,
-        description
-      },
-    });
+    // Request body'den veri al
+    const body = await request.json();
+    
+    // Veriyi doğrula
+    try {
+      const validatedData = businessProfileSchema.parse(body);
+      
+      // İşletme profili güncelleme
+      const updatedProfile = await prisma.business.update({
+        where: {
+          id: businessId
+        },
+        data: {
+          ...validatedData
+        }
+      });
 
-    return NextResponse.json(updatedProfile);
+      return NextResponse.json(updatedProfile);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return NextResponse.json(
+          { error: "Geçersiz veri formatı", details: error.format() },
+          { status: 400 }
+        );
+      }
+      throw error;
+    }
   } catch (error) {
-    console.error('Error updating business profile:', error);
+    console.error('İşletme profili güncelleme hatası:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'İşletme profili güncellenirken bir hata oluştu' },
       { status: 500 }
     );
   }
 }
 
-// POST endpoint for uploading business profile images (logo, cover)
-export async function POST(request: NextRequest) {
+// PATCH: Belirli alanları güncelle (kısmi güncelleme)
+export async function PATCH(request: NextRequest) {
   try {
-    // Get token from request headers
+    // Token doğrulama
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: 'Unauthorized: Token is missing' },
+        { error: 'Yetkilendirme token\'ı eksik' },
         { status: 401 }
       );
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = await verifyJwtToken(token);
+    const decoded = await verifyJWT(token) as JWTPayload;
 
     if (!decoded || decoded.role !== 'BUSINESS') {
       return NextResponse.json(
-        { error: 'Unauthorized: Invalid token or insufficient permissions' },
+        { error: 'Bu işlem için yetkiniz yok' },
         { status: 403 }
       );
     }
 
-    // Find the business profile
+    const businessId = decoded.businessId;
+    if (!businessId) {
+      return NextResponse.json(
+        { error: 'İşletme ID\'si bulunamadı' },
+        { status: 400 }
+      );
+    }
+
+    // URL parametresinden güncelleme türünü al
+    const url = new URL(request.url);
+    const updateType = url.searchParams.get('type');
+
+    // Request body'den veri al
+    const body = await request.json();
+
+    // İşletmeyi bul
     const business = await prisma.business.findUnique({
       where: {
-        userId: decoded.userId,
-      },
+        id: businessId
+      }
     });
 
     if (!business) {
       return NextResponse.json(
-        { error: 'Business profile not found' },
+        { error: 'İşletme profili bulunamadı' },
         { status: 404 }
       );
     }
 
-    // This would handle file uploads in a real implementation
-    // For now, we'll just update the image URLs
-    const { imageUrl } = await request.json();
+    // Güncelleme türüne göre işlem yap
+    let updateData = {};
+    
+    switch (updateType) {
+      case 'contact':
+        // İletişim bilgileri güncelleme
+        updateData = {
+          phone: body.phone,
+          email: body.email,
+          website: body.website,
+          address: body.address
+        };
+        break;
+      
+      case 'location':
+        // Konum bilgileri güncelleme
+        updateData = {
+          latitude: body.latitude,
+          longitude: body.longitude,
+          deliveryRadius: body.deliveryRadius
+        };
+        break;
+      
+      case 'business-hours':
+        // Çalışma saatleri güncelleme
+        updateData = {
+          openingTime: body.openingTime,
+          closingTime: body.closingTime
+        };
+        break;
+      
+      case 'social-media':
+        // Sosyal medya linkleri güncelleme
+        updateData = {
+          facebook: body.facebook,
+          instagram: body.instagram,
+          twitter: body.twitter
+        };
+        break;
+      
+      case 'images':
+        // Logo ve kapak görseli güncelleme
+        updateData = {
+          logoUrl: body.logoUrl,
+          coverUrl: body.coverUrl
+        };
+        break;
+      
+      default:
+        return NextResponse.json(
+          { error: 'Geçersiz güncelleme türü' },
+          { status: 400 }
+        );
+    }
 
+    // Veriyi güncelle
     const updatedProfile = await prisma.business.update({
       where: {
-        id: business.id,
+        id: businessId
       },
-      data: {
-        // In a real implementation, you would store image URLs here
-        // For now, we'll use a temporary field in the description
-        description: `${business.description || ''} [Image: ${imageUrl}]`
-      },
+      data: updateData
     });
 
     return NextResponse.json(updatedProfile);
   } catch (error) {
-    console.error('Error uploading business profile image:', error);
+    console.error('İşletme profili güncelleme hatası:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'İşletme profili güncellenirken bir hata oluştu' },
       { status: 500 }
     );
   }

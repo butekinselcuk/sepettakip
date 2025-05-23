@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyJWT } from '@/lib/auth';
-import { PrismaClient } from '@prisma/client';
-
-const prismaClient = new PrismaClient();
 
 // GET /api/orders/[id] - Belirli bir siparişi getir
 export async function GET(
@@ -241,17 +238,17 @@ async function getUserRoleId(userId: string, role: string) {
     
     switch(role) {
       case 'CUSTOMER':
-        result = await prismaClient.customer.findUnique({
+        result = await prisma.customer.findUnique({
           where: { userId }
         });
         break;
       case 'BUSINESS':
-        result = await prismaClient.business.findUnique({
+        result = await prisma.business.findUnique({
           where: { userId }
         });
         break;
       case 'COURIER':
-        result = await prismaClient.courier.findUnique({
+        result = await prisma.courier.findUnique({
           where: { userId }
         });
         break;

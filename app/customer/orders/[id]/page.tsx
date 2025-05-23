@@ -21,9 +21,15 @@ import {
   Info,
   FileText,
   CheckCircle,
-  XCircle
+  XCircle,
+  RefreshCcw,
+  RotateCcw
 } from "lucide-react";
 import Header from "@/components/Header";
+
+// Import the modals
+import CancellationRequestModal from "@/app/components/customer/CancellationRequestModal";
+import RefundRequestModal from "@/app/components/customer/RefundRequestModal";
 
 interface OrderItem {
   id: string;
@@ -62,6 +68,8 @@ interface Order {
     currentLongitude?: number;
     lastLocationUpdate?: string;
   };
+  cancellationStatus?: string;
+  refundStatus?: string;
 }
 
 export default function OrderDetail({ params }: { params: { id: string } }) {
@@ -70,6 +78,10 @@ export default function OrderDetail({ params }: { params: { id: string } }) {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  
+  // Modal durumları
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showRefundModal, setShowRefundModal] = useState(false);
   
   const orderId = params.id;
 
@@ -184,43 +196,48 @@ export default function OrderDetail({ params }: { params: { id: string } }) {
   };
 
   const handleCancelOrder = async () => {
-    if (!order) return;
-    
-    try {
-      const token = localStorage.getItem("token");
-      
-      if (!token) {
-        router.push("/auth/login");
-        return;
-      }
+    // Doğrudan iptal etmek yerine modal göster
+    setShowCancelModal(true);
+  };
 
-      const response = await axios.post(
-        `/api/customer/orders/${orderId}/cancel`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+  // İade talebi oluşturma
+  const handleRefundOrder = () => {
+    setShowRefundModal(true);
+  };
 
-      if (response.status === 200) {
-        // Update the order status in the UI
-        setOrder({
-          ...order,
-          status: "CANCELLED",
-          updatedAt: new Date().toISOString()
-        });
-      }
-    } catch (error) {
-      console.error("Sipariş iptal hatası:", error);
-      setError("Sipariş iptal edilirken bir hata oluştu. Lütfen daha sonra tekrar deneyin.");
-      
-      // For development, update the UI anyway
-      if (order) {
-        setOrder({
-          ...order,
-          status: "CANCELLED",
-          updatedAt: new Date().toISOString()
-        });
-      }
+  // İptal tamamlandığında
+  const handleCancellationComplete = (success: boolean) => {
+    if (success && order) {
+      // Sipariş durumunu güncelle (frontend tarafında)
+      setOrder({
+        ...order,
+        status: "CANCELLED",
+        cancellationStatus: "PENDING", // veya AUTO_APPROVED
+        updatedAt: new Date().toISOString()
+      });
     }
+    
+    // Değişiklikleri görebilmek için sayfayı yenile
+    setTimeout(() => {
+      fetchOrderDetails();
+    }, 1500);
+  };
+
+  // İade tamamlandığında
+  const handleRefundComplete = (success: boolean) => {
+    if (success && order) {
+      // Sipariş durumunu güncelle (frontend tarafında)
+      setOrder({
+        ...order,
+        refundStatus: "PENDING",
+        updatedAt: new Date().toISOString()
+      });
+    }
+    
+    // Değişiklikleri görebilmek için sayfayı yenile
+    setTimeout(() => {
+      fetchOrderDetails();
+    }, 1500);
   };
 
   const handleViewOnMap = () => {
@@ -542,6 +559,41 @@ export default function OrderDetail({ params }: { params: { id: string } }) {
                     </span>
                   </div>
                   
+                  {/* Durum bildirimi alanı */}
+                  {order.cancellationStatus && (
+                    <div className="mt-2 bg-yellow-50 p-2 rounded-md text-sm">
+                      <p className="text-yellow-800">
+                        {order.cancellationStatus === 'PENDING' ? 
+                          'İptal talebiniz değerlendiriliyor' : 
+                          order.cancellationStatus === 'APPROVED' ? 
+                          'İptal talebiniz onaylandı' : 
+                          order.cancellationStatus === 'REJECTED' ? 
+                          'İptal talebiniz reddedildi' : 
+                          order.cancellationStatus === 'AUTO_APPROVED' ? 
+                          'Siparişiniz otomatik olarak iptal edildi' : ''
+                        }
+                      </p>
+                    </div>
+                  )}
+                  
+                  {order.refundStatus && (
+                    <div className="mt-2 bg-blue-50 p-2 rounded-md text-sm">
+                      <p className="text-blue-800">
+                        {order.refundStatus === 'PENDING' ? 
+                          'İade talebiniz değerlendiriliyor' : 
+                          order.refundStatus === 'APPROVED' ? 
+                          'İade talebiniz onaylandı' : 
+                          order.refundStatus === 'PARTIAL_APPROVED' ? 
+                          'İade talebiniz kısmen onaylandı' : 
+                          order.refundStatus === 'REJECTED' ? 
+                          'İade talebiniz reddedildi' : 
+                          order.refundStatus === 'CANCELLED' ? 
+                          'İade talebiniz iptal edildi' : ''
+                        }
+                      </p>
+                    </div>
+                  )}
+                  
                   <div className="mt-6 space-y-4">
                     {(order.status === "IN_TRANSIT" || order.status === "READY") && (
                       <button
@@ -554,7 +606,9 @@ export default function OrderDetail({ params }: { params: { id: string } }) {
                       </button>
                     )}
                     
-                    {(order.status === "PENDING" || order.status === "PROCESSING") && (
+                    {/* İptal butonu - PENDING, PROCESSING, PREPARING durumlarında göster */}
+                    {(order.status === "PENDING" || order.status === "PROCESSING" || order.status === "PREPARING") && 
+                     !order.cancellationStatus && (
                       <button
                         type="button"
                         onClick={handleCancelOrder}
@@ -562,6 +616,18 @@ export default function OrderDetail({ params }: { params: { id: string } }) {
                       >
                         <XCircle className="h-5 w-5 mr-2" />
                         Siparişi İptal Et
+                      </button>
+                    )}
+                    
+                    {/* İade butonu - Teslim edilmiş siparişler için göster */}
+                    {order.status === "DELIVERED" && !order.refundStatus && (
+                      <button
+                        type="button"
+                        onClick={handleRefundOrder}
+                        className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500"
+                      >
+                        <RotateCcw className="h-5 w-5 mr-2" />
+                        İade Talebi Oluştur
                       </button>
                     )}
                     
@@ -573,7 +639,7 @@ export default function OrderDetail({ params }: { params: { id: string } }) {
                       Siparişlere Dön
                     </Link>
                     
-                    {order.status === "DELIVERED" && (
+                    {order.status === "DELIVERED" && !order.refundStatus && (
                       <Link
                         href={`/customer/orders/${order.id}/rate`}
                         className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
@@ -674,6 +740,25 @@ export default function OrderDetail({ params }: { params: { id: string } }) {
           </div>
         )}
       </main>
+      
+      {/* Modals */}
+      {order && (
+        <>
+          <CancellationRequestModal
+            order={order}
+            isOpen={showCancelModal}
+            onClose={() => setShowCancelModal(false)}
+            onComplete={handleCancellationComplete}
+          />
+          
+          <RefundRequestModal
+            order={order}
+            isOpen={showRefundModal}
+            onClose={() => setShowRefundModal(false)}
+            onComplete={handleRefundComplete}
+          />
+        </>
+      )}
     </div>
   );
 } 

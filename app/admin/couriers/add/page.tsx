@@ -3,7 +3,12 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import AdminLayout from "@/app/components/layouts/AdminLayout";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
+import { useToast } from "@/app/components/ui/use-toast";
+
+// Status türleri için string literal tip
+type CourierStatus = "ACTIVE" | "INACTIVE" | "PENDING";
+type VehicleType = "MOTORCYCLE" | "CAR" | "BICYCLE" | "WALKING" | "" | "default-value";
 
 interface User {
   id: string;
@@ -12,13 +17,21 @@ interface User {
   role: string;
 }
 
+interface CourierFormData {
+  userId: string;
+  vehicleType: string;
+  phone: string;
+  status: CourierStatus;
+}
+
 export default function AddCourier() {
   const router = useRouter();
+  const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CourierFormData>({
     userId: "",
     vehicleType: "",
     phone: "",
@@ -30,6 +43,7 @@ export default function AddCourier() {
     const fetchUsers = async () => {
       try {
         setLoadingUsers(true);
+        setError("");
         const token = localStorage.getItem("token");
         
         if (!token) {
@@ -37,28 +51,17 @@ export default function AddCourier() {
           return;
         }
 
-        // In real implementation, API would filter to get only COURIER role users without courier profiles
-        const response = await axios.get("/api/users?role=COURIER&withoutProfile=true", {
+        // API çağrısı: COURIER rolündeki kullanıcıları getir
+        const response = await axios.get<{users: User[]}>("/api/users?role=COURIER&withoutProfile=true", {
           headers: {
             Authorization: `Bearer ${token}`
           }
         });
 
-        // Simulate with mock data if the API doesn't exist yet
-        const mockData = [
-          { id: "1", name: "Test Courier 1", email: "courier1@example.com", role: "COURIER" },
-          { id: "2", name: "Test Courier 2", email: "courier2@example.com", role: "COURIER" },
-        ];
-
-        setUsers(response.data?.users || mockData);
+        setUsers(response.data?.users || []);
       } catch (err) {
-        console.error("Kullanıcıları getirme hatası:", err);
         setError("Kurye olabilecek kullanıcılar yüklenirken bir hata oluştu.");
-        // Use mock data if API fails
-        setUsers([
-          { id: "1", name: "Test Courier 1", email: "courier1@example.com", role: "COURIER" },
-          { id: "2", name: "Test Courier 2", email: "courier2@example.com", role: "COURIER" },
-        ]);
+        setUsers([]);
       } finally {
         setLoadingUsers(false);
       }
@@ -71,7 +74,7 @@ export default function AddCourier() {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: name === 'status' ? value as CourierStatus : value,
     }));
   };
 
@@ -84,6 +87,7 @@ export default function AddCourier() {
 
     try {
       setSaving(true);
+      setError("");
       const token = localStorage.getItem("token");
       
       if (!token) {
@@ -103,12 +107,24 @@ export default function AddCourier() {
       );
 
       if (response.status === 201 || response.status === 200) {
-        alert("Kurye başarıyla oluşturuldu!");
+        toast({
+          title: "Başarılı",
+          description: "Kurye başarıyla oluşturuldu!"
+        } as any);
         router.push("/admin/couriers");
       }
-    } catch (err: any) {
-      console.error("Kurye oluşturma hatası:", err);
-      setError(err.response?.data?.error || "Kurye oluşturulurken bir hata oluştu.");
+    } catch (err) {
+      const error = err as AxiosError;
+      if (error.response?.data && typeof error.response.data === 'object' && 'error' in error.response.data) {
+        setError((error.response.data as any).error);
+      } else {
+        setError("Kurye oluşturulurken bir hata oluştu.");
+      }
+      
+      toast({
+        title: "Hata",
+        description: "Kurye oluşturulurken bir hata oluştu."
+      } as any);
     } finally {
       setSaving(false);
     }
@@ -158,6 +174,9 @@ export default function AddCourier() {
                           ))
                         )}
                       </select>
+                      {users.length === 0 && !loadingUsers && (
+                        <p className="mt-1 text-sm text-red-500">Kullanıcı bulunamadı. Lütfen önce COURIER rolüne sahip kullanıcı oluşturun.</p>
+                      )}
                     </div>
                     
                     <div>

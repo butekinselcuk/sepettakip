@@ -2,6 +2,15 @@ import { NextResponse } from 'next/server';
 import { createReport, ReportOptions, runScheduledReports } from '@/lib/reporting';
 import { verifyJWT, getAuthUser } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import logger from '@/lib/logger';
+
+// Standart API yanıt formatı
+type ApiResponse<T> = {
+  success: boolean;
+  message: string;
+  data?: T;
+  error?: string;
+};
 
 // GET /api/reports - Tüm raporları listele
 export async function GET(req: Request) {
@@ -9,17 +18,29 @@ export async function GET(req: Request) {
     // Yetkilendirme kontrolü
     const token = req.headers.get('authorization')?.split(' ')[1];
     if (!token) {
-      return NextResponse.json({ error: 'Kimlik doğrulama gerekli' }, { status: 401 });
+      return NextResponse.json({
+        success: false,
+        message: 'Kimlik doğrulama gerekli',
+        error: 'Unauthorized'
+      }, { status: 401 });
     }
     
     const userData = await verifyJWT(token);
     if (!userData) {
-      return NextResponse.json({ error: 'Geçersiz token' }, { status: 401 });
+      return NextResponse.json({
+        success: false,
+        message: 'Geçersiz token',
+        error: 'Invalid token'
+      }, { status: 401 });
     }
     
     // Rol kontrolü
     if (!['ADMIN', 'BUSINESS'].includes(userData.role as string)) {
-      return NextResponse.json({ error: 'Yetkisiz erişim' }, { status: 403 });
+      return NextResponse.json({
+        success: false,
+        message: 'Yetkisiz erişim',
+        error: 'Forbidden'
+      }, { status: 403 });
     }
     
     // URL'den filtreleme parametrelerini al
@@ -62,18 +83,39 @@ export async function GET(req: Request) {
     // Toplam rapor sayısını al
     const totalReports = await prisma.report.count({ where: filter });
     
-    return NextResponse.json({
-      reports,
-      pagination: {
+    logger.info('Raporlar başarıyla getirildi', {
+      module: 'api',
+      context: {
+        count: reports.length,
+        total: totalReports,
         page,
-        limit,
-        totalItems: totalReports,
-        totalPages: Math.ceil(totalReports / limit),
-      },
+        userId: userData.id
+      }
+    });
+    
+    return NextResponse.json({
+      success: true,
+      message: 'Raporlar başarıyla getirildi',
+      data: {
+        reports,
+        pagination: {
+          page,
+          limit,
+          totalItems: totalReports,
+          totalPages: Math.ceil(totalReports / limit),
+        }
+      }
     });
   } catch (error) {
-    console.error('Raporları getirme hatası:', error);
-    return NextResponse.json({ error: 'Raporlar alınırken bir hata oluştu' }, { status: 500 });
+    logger.error('Raporları getirme hatası', error as Error, {
+      module: 'api'
+    });
+    
+    return NextResponse.json({
+      success: false,
+      message: 'Raporlar alınırken bir hata oluştu',
+      error: error instanceof Error ? error.message : 'Bilinmeyen hata'
+    }, { status: 500 });
   }
 }
 
@@ -83,17 +125,29 @@ export async function POST(req: Request) {
     // Yetkilendirme kontrolü
     const token = req.headers.get('authorization')?.split(' ')[1];
     if (!token) {
-      return NextResponse.json({ error: 'Kimlik doğrulama gerekli' }, { status: 401 });
+      return NextResponse.json({
+        success: false,
+        message: 'Kimlik doğrulama gerekli',
+        error: 'Unauthorized'
+      }, { status: 401 });
     }
     
     const userData = await verifyJWT(token);
     if (!userData) {
-      return NextResponse.json({ error: 'Geçersiz token' }, { status: 401 });
+      return NextResponse.json({
+        success: false,
+        message: 'Geçersiz token',
+        error: 'Invalid token'
+      }, { status: 401 });
     }
     
     // Rol kontrolü
     if (!['ADMIN', 'BUSINESS'].includes(userData.role as string)) {
-      return NextResponse.json({ error: 'Yetkisiz erişim' }, { status: 403 });
+      return NextResponse.json({
+        success: false,
+        message: 'Yetkisiz erişim',
+        error: 'Forbidden'
+      }, { status: 403 });
     }
     
     // İstek gövdesinden rapor seçeneklerini al
@@ -101,7 +155,11 @@ export async function POST(req: Request) {
     
     // Temel doğrulama
     if (!body.startDate || !body.endDate || !body.type || !body.format) {
-      return NextResponse.json({ error: 'Eksik parametreler' }, { status: 400 });
+      return NextResponse.json({
+        success: false,
+        message: 'Eksik parametreler',
+        error: 'Missing required parameters'
+      }, { status: 400 });
     }
     
     // Rapor seçeneklerini oluştur
@@ -122,10 +180,31 @@ export async function POST(req: Request) {
     // Rapor oluştur
     const report = await createReport(reportOptions);
     
-    return NextResponse.json({ report });
+    logger.info('Rapor başarıyla oluşturuldu', {
+      module: 'api',
+      context: {
+        reportId: report.id,
+        userId: userData.id,
+        type: body.type,
+        format: body.format
+      }
+    });
+    
+    return NextResponse.json({
+      success: true,
+      message: 'Rapor başarıyla oluşturuldu',
+      data: { report }
+    });
   } catch (error) {
-    console.error('Rapor oluşturma hatası:', error);
-    return NextResponse.json({ error: 'Rapor oluşturulurken bir hata oluştu' }, { status: 500 });
+    logger.error('Rapor oluşturma hatası', error as Error, {
+      module: 'api'
+    });
+    
+    return NextResponse.json({
+      success: false,
+      message: 'Rapor oluşturulurken bir hata oluştu',
+      error: error instanceof Error ? error.message : 'Bilinmeyen hata'
+    }, { status: 500 });
   }
 }
 
@@ -138,22 +217,49 @@ export async function PATCH(req: Request) {
     const authHeader = req.headers.get('authorization');
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Yetkisiz erişim' }, { status: 403 });
+      return NextResponse.json({
+        success: false,
+        message: 'Yetkisiz erişim',
+        error: 'Unauthorized'
+      }, { status: 403 });
     }
     
     const token = authHeader.split(' ')[1];
     const userData = await verifyJWT(token);
     
     if (!userData || userData.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Yetkisiz erişim' }, { status: 403 });
+      return NextResponse.json({
+        success: false,
+        message: 'Yetkisiz erişim',
+        error: 'Forbidden'
+      }, { status: 403 });
     }
     
     // Planlanmış raporları çalıştır
-    await runScheduledReports();
+    const result = await runScheduledReports();
     
-    return NextResponse.json({ message: 'Planlanmış raporlar çalıştırıldı' });
+    logger.info('Planlanmış raporlar çalıştırıldı', {
+      module: 'reports',
+      context: {
+        reportsRun: result.length,
+        triggeredBy: userData.id
+      }
+    });
+    
+    return NextResponse.json({
+      success: true,
+      message: 'Planlanmış raporlar çalıştırıldı',
+      data: { reports: result }
+    });
   } catch (error) {
-    console.error('Planlanmış raporları çalıştırma hatası:', error);
-    return NextResponse.json({ error: 'Planlanmış raporlar çalıştırılırken bir hata oluştu' }, { status: 500 });
+    logger.error('Planlanmış raporları çalıştırma hatası', error as Error, {
+      module: 'reports'
+    });
+    
+    return NextResponse.json({
+      success: false,
+      message: 'Planlanmış raporlar çalıştırılırken bir hata oluştu',
+      error: error instanceof Error ? error.message : 'Bilinmeyen hata'
+    }, { status: 500 });
   }
 } 

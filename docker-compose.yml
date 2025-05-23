@@ -10,6 +10,7 @@ volumes:
   postgres-data:
   node_modules:
   next-cache:
+  playwright-results:
 
 # Servisler
 services:
@@ -61,19 +62,53 @@ services:
         condition: service_healthy
     command: npm run dev
 
-  # Next.js Uygulaması - Production
-  app-prod:
-    profiles: ["prod"]
+  # Next.js Uygulaması - Staging
+  app-staging:
+    profiles: ["staging"]
     build:
       context: .
       target: production
       dockerfile: Dockerfile
-    container_name: sepettakip-app-prod
+    container_name: sepettakip-app-staging
     restart: always
+    ports:
+      - "3001:3000"
+    networks:
+      - sepettakip-network
+    environment:
+      - DATABASE_URL=${STAGING_DB_URL}
+      - NODE_ENV=staging
+      - NEXTAUTH_SECRET=${STAGING_NEXTAUTH_SECRET}
+      - NEXTAUTH_URL=${STAGING_NEXTAUTH_URL}
+      - APP_VERSION=${APP_VERSION:-1.0.0}
+      - LOG_LEVEL=debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Next.js Uygulaması - Production
+  app:
+    profiles: ["prod"]
+    image: sepettakip-app:latest
+    build:
+      context: .
+      target: production
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
+    container_name: sepettakip-app
+    restart: unless-stopped
     ports:
       - "3000:3000"
     networks:
       - sepettakip-network
+    env_file:
+      - .env.production
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sepettakip}
       - NODE_ENV=production
@@ -81,4 +116,36 @@ services:
       - NEXTAUTH_URL=${NEXTAUTH_URL}
     depends_on:
       postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      
+  # Test environment for pages
+  test-pages:
+    profiles: ["test"]
+    image: sepettakip-test-pages:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      args:
+        - NODE_ENV=test
+    container_name: sepettakip-test-pages
+    networks:
+      - sepettakip-network
+    environment:
+      - TEST_URL=http://app:3000
+      - NODE_ENV=test
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sepettakip}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-sepettakip_test_secret}
+      - NEXTAUTH_URL=http://app:3000
+    volumes:
+      - ./test-results:/app/test-results
+      - ./playwright-report:/app/playwright-report
+      - ./page-test-report.md:/app/page-test-report.md
+      - ./lint-issues-report.md:/app/lint-issues-report.md
+    depends_on:
+      app:
         condition: service_healthy 

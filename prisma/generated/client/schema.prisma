@@ -1,0 +1,1277 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+  // Prisma 7 için output belirtmeyi unutmayın
+  output          = "./generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = "postgresql://postgres:postgres@localhost:5432/sepettakip"
+}
+
+// ------------------
+// ENUMs
+// ------------------
+
+enum NotificationType {
+  ORDER_PLACED
+  ORDER_ACCEPTED
+  ORDER_READY
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+  COURIER_ASSIGNED
+  PAYMENT_PROCESSED
+  REVIEW_REQUESTED
+  SYSTEM_NOTIFICATION
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  SMS
+}
+
+enum NotificationFrequency {
+  INSTANT
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum Role {
+  ADMIN
+  BUSINESS
+  COURIER
+  CUSTOMER
+}
+
+enum Status {
+  PENDING
+  PROCESSING
+  PREPARING
+  READY
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  RETURNED
+  REFUNDED
+  PARTIALLY_REFUNDED
+  ACCEPTED
+  PICKED_UP
+  FAILED
+}
+
+enum ReportType {
+  DAILY_PERFORMANCE
+  WEEKLY_SUMMARY
+  MONTHLY_ANALYTICS
+  CUSTOM
+  COURIER_PERFORMANCE
+  BUSINESS_PERFORMANCE
+}
+
+enum ReportFormat {
+  PDF
+  CSV
+  EXCEL
+  HTML
+}
+
+enum CourierAvailabilityStatus {
+  AVAILABLE
+  BUSY
+  OFFLINE
+  ON_BREAK
+}
+
+enum DeliveryPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  CASH
+  TRANSFER
+  MOBILE_PAYMENT
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum Platform {
+  WEB
+  YEMEKSEPETI
+  GETIR
+  TRENDYOL
+}
+
+enum RefundRequestStatus {
+  PENDING
+  APPROVED
+  PARTIAL_APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum CancellationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  AUTO_APPROVED
+}
+
+enum RefundReason {
+  DAMAGED_PRODUCT
+  WRONG_PRODUCT
+  PRODUCT_NOT_AS_DESCRIBED
+  MISSING_ITEMS
+  LATE_DELIVERY
+  QUALITY_ISSUES
+  OTHER
+}
+
+enum CancellationReason {
+  CUSTOMER_CHANGED_MIND
+  DUPLICATE_ORDER
+  DELIVERY_TOO_LONG
+  PRICE_ISSUES
+  RESTAURANT_CLOSED
+  OUT_OF_STOCK
+  OTHER
+}
+
+// Subscription related enums
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  PAUSED
+  TRIAL
+  EXPIRED
+  PENDING
+}
+
+enum SubscriptionInterval {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum CardBrand {
+  VISA
+  MASTERCARD
+  AMEX
+  DISCOVER
+  TROY
+  OTHER
+}
+
+enum PaymentProvider {
+  STRIPE
+  IYZICO
+  PAYPAL
+  MANUAL
+}
+
+// ------------------
+// MODELS
+// ------------------
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relationships based on role
+  admin    Admin?
+  business Business?
+  courier  Courier?
+  customer Customer?
+
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  reports                 Report[]
+  scheduledReports        ScheduledReport[]
+  settings                UserSettings?
+  activityLogs            ActivityLog[]
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model Admin {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Admin-specific fields
+  department   String?
+  level        Int      @default(1) // 1: Normal, 2: Supervisor, 3: Manager, 4: Administrator
+  permissions  String[] // Array of permission codes
+  title        String?
+  phone        String?
+  profileImage String?
+
+  // Audit and security fields
+  lastLogin      DateTime?
+  loginAttempts  Int       @default(0)
+  isSuperAdmin   Boolean   @default(false)
+  ipRestrictions String[] // Array of allowed IP addresses
+
+  // Activity tracking
+  activityLogs  ActivityLog[]
+  systemActions SystemAction[]
+
+  // Dashboard widgets
+  dashboardWidgets AdminDashboardWidget[]
+
+  // Admin role mappings
+  roleMappings AdminRoleMapping[]
+
+  @@index([userId])
+  @@index([level])
+  @@index([isSuperAdmin])
+  @@map("admins")
+}
+
+model Courier {
+  id          String  @id @default(uuid())
+  userId      String  @unique
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      Status  @default(ACTIVE)
+  vehicleType String? // CAR, MOTORCYCLE, BICYCLE, etc.
+  phone       String?
+  zoneId      String? // Optional: assigned to a delivery zone
+  zone        Zone?   @relation(fields: [zoneId], references: [id])
+  ratings     Float?  @default(0)
+
+  // Current location
+  currentLatitude    Float?
+  currentLongitude   Float?
+  lastLocationUpdate DateTime?
+
+  // Service hours
+  availableFrom DateTime?
+  availableTo   DateTime?
+
+  // Delivery history
+  orders Order[] // Orders they've delivered
+
+  // Additional background checks or documents
+  documentsVerified Boolean @default(false)
+  backgroundChecked Boolean @default(false)
+
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
+  deliveryLogs            DeliveryLog[]
+  deliveries              Delivery[]
+  payments                Payment[]                @relation("CourierPayments")
+
+  // Route optimization
+  availability        CourierAvailability[]
+  deliveryRoutes      DeliveryRoute[]
+  maxDeliveriesPerDay Int                   @default(15)
+  maxDistance         Float? // Maximum distance (km) to travel
+  averageSpeed        Float? // Average speed (km/h) for estimation
+  courierFee          Float? // Fee per delivery
+
+  // Yeni eklenen alanlar
+  lastSeen           DateTime?                  @updatedAt
+  availabilityStatus CourierAvailabilityStatus? @default(AVAILABLE)
+
+  @@index([status])
+  @@index([zoneId])
+  @@index([currentLatitude, currentLongitude])
+  @@map("couriers")
+}
+
+model Order {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status    Status   @default(PENDING)
+
+  // Order details
+  totalPrice        Float
+  items             Json // Array of items
+  address           String
+  notes             String?
+  estimatedDelivery DateTime?
+  actualDelivery    DateTime?
+
+  // Location
+  latitude  Float?
+  longitude Float?
+
+  // Relations
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id])
+
+  courierId String?
+  courier   Courier? @relation(fields: [courierId], references: [id])
+
+  // Notifications
+  notifications Notification[]
+
+  // Payment information
+  payments Payment[]
+
+  // Route optimization
+  priority            DeliveryPriority    @default(MEDIUM)
+  requestedTimeWindow DeliveryTimeWindow? @relation(fields: [timeWindowId], references: [id])
+  timeWindowId        String?
+  estimatedDuration   Int? // In minutes
+  estimatedDistance   Float? // In kilometers
+  sequenceNumber      Int? // Delivery sequence in route
+  delivery            Delivery?
+
+  refundStatus         String?
+  cancellationStatus   String?
+  refundRequests       RefundRequest[]
+  cancellationRequests CancellationRequest[]
+
+  @@index([status])
+  @@index([customerId])
+  @@index([businessId])
+  @@index([courierId])
+  @@index([latitude, longitude])
+  @@index([createdAt])
+  @@index([sequenceNumber])
+  @@index([priority])
+  @@map("orders")
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phone     String?
+  address   String?
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+
+  // Delivery history
+  deliveries Delivery[]
+
+  // Multiple address support
+  addresses CustomerAddress[]
+
+  refundRequests       RefundRequest[]
+  cancellationRequests CancellationRequest[]
+
+  // Payment methods
+  savedPaymentMethods SavedPaymentMethod[]
+
+  // Subscriptions
+  subscriptions Subscription[]
+
+  @@index([userId])
+  @@index([latitude, longitude])
+  @@map("customers")
+}
+
+model Business {
+  id          String  @id @default(uuid())
+  userId      String  @unique
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  address     String?
+  phone       String?
+  website     String?
+  email       String?
+  logoUrl     String?
+  coverUrl    String?
+  latitude    Float?
+  longitude   Float?
+  zoneId      String? // Optional: belongs to a delivery zone
+  zone        Zone?   @relation(fields: [zoneId], references: [id])
+  status      Status  @default(ACTIVE)
+  rating      Float? // Average rating
+
+  // Financial information
+  tax_id    String?
+  bank_iban String?
+
+  // Business specific collections
+  inventory         Inventory[]
+  orders            Order[]
+  menuItems         MenuItem[]
+  productCategories ProductCategory[]
+  payments          Payment[]         @relation("BusinessPayments")
+
+  // Business hours
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  openingTime    String?
+  closingTime    String?
+  deliveryRadius Float? // In kilometers
+  deliveryFee    Float? // Base delivery fee
+
+  // Social media links
+  facebook  String?
+  instagram String?
+  twitter   String?
+
+  // Business type and attributes
+  type     String? // Restaurant, Market, Pharmacy, etc.
+  tags     String[] // Tags for search and filtering
+  features String[] // Special features of the business
+
+  refundPolicies       RefundPolicy[]
+  refundRequests       RefundRequest[]
+  cancellationRequests CancellationRequest[]
+
+  // Subscription related fields
+  subscriptionPlans SubscriptionPlan[]
+  subscriptions     Subscription[]     @relation("BusinessSubscriptions")
+
+  @@index([userId])
+  @@index([status])
+  @@index([name])
+  @@index([latitude, longitude])
+  @@map("businesses")
+}
+
+model Zone {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  coordinates Json // GeoJSON polygon or multipolygon
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  businesses Business[]
+  couriers   Courier[]
+  deliveries Delivery[]
+
+  // Zone statistics
+  averageDeliveryTime Int? // In minutes
+  orderVolume         Int? // Average orders per day
+  activeBusinesses    Int? // Count of active businesses
+
+  @@index([name])
+  @@map("zones")
+}
+
+model NotificationPreference {
+  id        String                @id @default(uuid())
+  userId    String
+  user      User                  @relation(fields: [userId], references: [id])
+  courierId String?
+  courier   Courier?              @relation(fields: [courierId], references: [id])
+  type      NotificationType
+  channel   NotificationChannel
+  frequency NotificationFrequency @default(INSTANT)
+  enabled   Boolean               @default(true)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@unique([userId, type, channel])
+  @@index([userId])
+  @@index([courierId])
+  @@index([type])
+  @@map("notification_preferences")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  title     String
+  content   String
+  type      NotificationType
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  courierId String?
+  courier   Courier? @relation(fields: [courierId], references: [id])
+
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  // Additional fields for tracking delivery
+  metadata Json? // Any additional data
+
+  @@index([userId])
+  @@index([courierId])
+  @@index([orderId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Delivery {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status    String
+
+  // Assignment information
+  courierId  String
+  courier    Courier  @relation(fields: [courierId], references: [id])
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  zoneId     String
+  zone       Zone     @relation(fields: [zoneId], references: [id])
+  orderId    String?  @unique
+  order      Order?   @relation(fields: [orderId], references: [id])
+
+  // Timing and distance
+  assignedAt            DateTime?
+  pickedUpAt            DateTime?
+  deliveredAt           DateTime?
+  estimatedPickupTime   DateTime?
+  estimatedDeliveryTime DateTime?
+  duration              Int? // Planned duration in minutes
+  actualDuration        Int? // Actual duration in minutes
+  distance              Float? // Planned distance in kilometers
+  actualDistance        Float? // Actual distance traveled in kilometers
+
+  // Location data
+  pickupLatitude   Float?
+  pickupLongitude  Float?
+  dropoffLatitude  Float?
+  dropoffLongitude Float?
+
+  // Route optimization
+  routeId        String?
+  route          DeliveryRoute?   @relation(fields: [routeId], references: [id])
+  sequenceNumber Int? // Position in delivery sequence
+  priority       DeliveryPriority @default(MEDIUM)
+
+  @@index([status])
+  @@index([courierId])
+  @@index([customerId])
+  @@index([zoneId])
+  @@index([routeId])
+  @@index([sequenceNumber])
+  @@index([pickupLatitude, pickupLongitude])
+  @@index([dropoffLatitude, dropoffLongitude])
+  @@index([createdAt])
+  @@map("deliveries")
+}
+
+model Inventory {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  name        String
+  description String?
+  quantity    Int
+  price       Float
+  sku         String?
+  imageUrl    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Category relations
+  categoryId String?
+  category   ProductCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([businessId])
+  @@index([name])
+  @@index([isActive])
+  @@index([categoryId])
+  @@map("inventory")
+}
+
+model DeliveryLog {
+  id        String   @id @default(uuid())
+  courierId String
+  courier   Courier  @relation(fields: [courierId], references: [id])
+  action    String // STARTED, PICKED_UP, DELIVERED, CANCELLED, etc.
+  timestamp DateTime @default(now())
+  latitude  Float?
+  longitude Float?
+  note      String?
+  metadata  Json? // Additional data like battery level, speed, etc.
+
+  @@index([courierId])
+  @@index([timestamp])
+  @@index([action])
+  @@index([latitude, longitude])
+  @@map("delivery_logs")
+}
+
+model Report {
+  id         String       @id @default(uuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  name       String
+  type       ReportType
+  format     ReportFormat
+  parameters Json? // Filter parameters
+  createdAt  DateTime     @default(now())
+  data       Json? // Cached report data
+  url        String? // URL to download the report
+  expiresAt  DateTime? // When the cached report expires
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model Schedule {
+  id        String   @id @default(uuid())
+  dayOfWeek Int // 0-6, where 0 is Sunday
+  startTime String // HH:MM format
+  endTime   String // HH:MM format
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations for different schedule types
+  reports ScheduledReport[]
+
+  @@index([dayOfWeek])
+  @@map("schedules")
+}
+
+model ScheduledReport {
+  id         String       @id @default(uuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  scheduleId String
+  schedule   Schedule     @relation(fields: [scheduleId], references: [id])
+  reportName String
+  type       ReportType
+  format     ReportFormat
+  parameters Json? // Filter parameters
+  enabled    Boolean      @default(true)
+  recipients String[] // Email addresses
+  nextRunAt  DateTime? // Bir sonraki çalıştırma zamanı
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([scheduleId])
+  @@index([enabled])
+  @@index([nextRunAt])
+  @@map("scheduled_reports")
+}
+
+model UserSettings {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  language      String   @default("tr")
+  theme         String   @default("light")
+  notifications Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@map("user_settings")
+}
+
+model MenuItem {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  name        String
+  description String?
+  price       Float
+  imageUrl    String?
+  category    String?
+  tags        String[]
+  ingredients String[]
+  calories    Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([category])
+  @@index([isActive])
+  @@map("menu_items")
+}
+
+model CourierAvailability {
+  id        String                    @id @default(uuid())
+  courierId String
+  courier   Courier                   @relation(fields: [courierId], references: [id])
+  status    CourierAvailabilityStatus
+  startTime DateTime
+  endTime   DateTime?
+  note      String?
+  createdAt DateTime                  @default(now())
+
+  @@index([courierId])
+  @@index([status])
+  @@index([startTime, endTime])
+  @@map("courier_availability")
+}
+
+model DeliveryTimeWindow {
+  id             String  @id @default(uuid())
+  name           String
+  startTime      String // HH:MM format
+  endTime        String // HH:MM format
+  description    String?
+  priorityFactor Float   @default(1.0) // Higher values increase priority
+
+  // Records that use this time window
+  orders Order[]
+
+  @@index([name])
+  @@map("delivery_time_windows")
+}
+
+model DeliveryRoute {
+  id          String    @id @default(uuid())
+  courierId   String
+  courier     Courier   @relation(fields: [courierId], references: [id])
+  name        String?
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  status      Status    @default(PENDING)
+
+  // Route details
+  totalDistance  Float? // Kilometers
+  totalDuration  Int? // Minutes
+  startLatitude  Float?
+  startLongitude Float?
+  endLatitude    Float?
+  endLongitude   Float?
+  routePath      Json? // GeoJSON LineString of the route
+
+  // Optimized deliveries
+  deliveries Delivery[]
+
+  @@index([courierId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([startLatitude, startLongitude])
+  @@index([endLatitude, endLongitude])
+  @@map("delivery_routes")
+}
+
+model Payment {
+  id          String        @id @default(uuid())
+  amount      Float
+  currency    String        @default("TRY")
+  method      PaymentMethod
+  status      PaymentStatus @default(PENDING)
+  reference   String? // External payment reference
+  description String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  processedAt DateTime?
+
+  // Relations
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  recipientId String? // For courier payments
+  recipient   Courier? @relation("CourierPayments", fields: [recipientId], references: [id])
+
+  businessId String? // For business payments
+  business   Business? @relation("BusinessPayments", fields: [businessId], references: [id])
+
+  @@index([status])
+  @@index([orderId])
+  @@index([recipientId])
+  @@index([businessId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+// Ürün Kategorileri modeli
+model ProductCategory {
+  id          String   @id @default(uuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id])
+  name        String
+  description String?
+  slug        String
+  imageUrl    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Parent category for hierarchical structure
+  parentId String?
+  parent   ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children ProductCategory[] @relation("CategoryHierarchy")
+
+  // Products in this category
+  products Inventory[]
+
+  @@unique([businessId, slug])
+  @@index([businessId])
+  @@index([isActive])
+  @@index([parentId])
+  @@map("product_categories")
+}
+
+// Yeni model: Erişim logları
+model ActivityLog {
+  id          String    @id @default(uuid())
+  action      String
+  description String
+  createdAt   DateTime  @default(now())
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+  targetId    String?
+  targetType  String?
+  ip          String?
+  userAgent   String?
+  adminId     String?
+  admin       Admin?    @relation(fields: [adminId], references: [id])
+  metadata    Json? // Additional data about the activity
+  severity    String?   @default("INFO") // INFO, WARNING, ERROR, CRITICAL
+  category    String?   @default("SYSTEM") // SYSTEM, USER, BUSINESS, COURIER, ORDER, etc.
+  isResolved  Boolean   @default(true)
+  resolvedAt  DateTime?
+  resolvedBy  String?
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([adminId])
+  @@index([targetType, targetId])
+  @@index([severity])
+  @@index([category])
+  @@map("activity_logs")
+}
+
+// Yeni model: Sistem işlemleri
+model SystemAction {
+  id            String   @id @default(uuid())
+  action        String
+  description   String
+  createdAt     DateTime @default(now())
+  adminId       String?
+  admin         Admin?   @relation(fields: [adminId], references: [id])
+  status        String   @default("COMPLETED") // PENDING, IN_PROGRESS, COMPLETED, FAILED
+  payload       Json? // Input parameters
+  result        Json? // Output result
+  error         String?
+  executionTime Int? // Time taken in milliseconds
+
+  @@index([createdAt])
+  @@index([adminId])
+  @@index([status])
+  @@map("system_actions")
+}
+
+// Yeni model: Sistem Ayarları
+model SystemSettings {
+  id          String   @id @default(uuid())
+  key         String   @unique // Setting identifier
+  value       String // Setting value
+  category    String // Group for the setting (e.g., "payment", "notification", "security")
+  description String? // Description of what this setting does
+  dataType    String // Type of data (e.g., "string", "boolean", "number", "json")
+  isEncrypted Boolean  @default(false) // Whether the value is stored encrypted
+  lastUpdated DateTime @default(now())
+  updatedBy   String? // ID of admin who last updated it
+
+  @@index([category])
+  @@index([key])
+  @@map("system_settings")
+}
+
+// Yeni model: Admin Dashboard Widgets
+model AdminDashboardWidget {
+  id        String   @id @default(uuid())
+  name      String
+  type      String // CHART, TABLE, METRIC, CARD, etc.
+  position  Int      @default(0)
+  size      String   @default("MEDIUM") // SMALL, MEDIUM, LARGE
+  config    Json // Widget-specific configuration
+  isActive  Boolean  @default(true)
+  adminId   String
+  admin     Admin    @relation(fields: [adminId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([adminId])
+  @@map("admin_dashboard_widgets")
+}
+
+// Yeni model: Admin Permissions
+model AdminPermission {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Many-to-many relationships
+  adminRoles AdminRole[]
+
+  @@map("admin_permissions")
+}
+
+// Yeni model: Admin Roles
+model AdminRole {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Many-to-many relationships
+  permissions AdminPermission[]
+  admins      AdminRoleMapping[]
+
+  @@map("admin_roles")
+}
+
+// Yeni model: Admin Role Mapping
+model AdminRoleMapping {
+  id        String    @id @default(uuid())
+  adminId   String
+  admin     Admin     @relation(fields: [adminId], references: [id])
+  roleId    String
+  role      AdminRole @relation(fields: [roleId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([adminId, roleId])
+  @@index([adminId])
+  @@index([roleId])
+  @@map("admin_role_mappings")
+}
+
+// E-posta şablonu modeli
+model EmailTemplate {
+  id          String      @id @default(cuid())
+  name        String      @unique
+  subject     String
+  body        String      @db.Text
+  category    String
+  description String?     @db.Text
+  isActive    Boolean     @default(true)
+  variables   Json        @default("[]")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  createdBy   String
+  updatedBy   String?
+  sentEmails  SentEmail[]
+}
+
+// Gönderilen e-posta kaydı
+model SentEmail {
+  id         String        @id @default(cuid())
+  templateId String
+  template   EmailTemplate @relation(fields: [templateId], references: [id])
+  recipient  String
+  subject    String
+  variables  String        @db.Text
+  messageId  String?
+  sentBy     String
+  sentAt     DateTime      @default(now())
+  status     String        @default("SENT") // SENT, DELIVERED, FAILED, BOUNCED
+  category   String        @default("SYSTEM") // SYSTEM, USER, NOTIFICATION, TEST
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+}
+
+// Customer address model
+model CustomerAddress {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Address details
+  title        String // Ev, İş, Yazlık, vb.
+  firstName    String
+  lastName     String
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String?
+  postalCode   String
+  country      String  @default("Türkiye")
+  phone        String?
+  notes        String?
+
+  // Geolocation
+  latitude  Float?
+  longitude Float?
+
+  // Flags
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([isDefault])
+  @@index([latitude, longitude])
+  @@map("customer_addresses")
+}
+
+model RefundRequest {
+  id             String              @id @default(uuid())
+  orderId        String
+  order          Order               @relation(fields: [orderId], references: [id])
+  customerId     String
+  customer       Customer            @relation(fields: [customerId], references: [id])
+  businessId     String
+  business       Business            @relation(fields: [businessId], references: [id])
+  status         RefundRequestStatus @default(PENDING)
+  reason         RefundReason
+  otherReason    String? // Eğer reason OTHER ise
+  requestedItems Json? // İade edilecek öğeler (kısmi iade için)
+  refundAmount   Float? // Talep edilen iade tutarı
+  approvedAmount Float? // Onaylanan iade tutarı
+  evidenceUrls   String[] // Kanıt fotoğrafları
+  adminNotes     String? // Yönetici notları
+  customerNotes  String? // Müşteri notları
+  businessNotes  String? // İşletme notları
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  reviewedAt     DateTime? // İncelenme tarihi
+  reviewedBy     String? // İnceleyen kişi (işletme kullanıcı ID'si)
+  refundedAt     DateTime? // İade işlemi tarihi
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([businessId])
+  @@index([status])
+  @@map("refund_requests")
+}
+
+model CancellationRequest {
+  id              String                    @id @default(uuid())
+  orderId         String
+  order           Order                     @relation(fields: [orderId], references: [id])
+  customerId      String
+  customer        Customer                  @relation(fields: [customerId], references: [id])
+  businessId      String
+  business        Business                  @relation(fields: [businessId], references: [id])
+  status          CancellationRequestStatus @default(PENDING)
+  reason          CancellationReason
+  otherReason     String? // Eğer reason OTHER ise
+  cancellationFee Float? // İptal ücreti (eğer varsa)
+  autoProcessed   Boolean                   @default(false) // Otomatik işlendi mi?
+  customerNotes   String? // Müşteri notları
+  businessNotes   String? // İşletme notları
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  reviewedAt      DateTime? // İncelenme tarihi
+  reviewedBy      String? // İnceleyen kişi (işletme kullanıcı ID'si)
+  cancelledAt     DateTime? // İptal işlemi tarihi
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([businessId])
+  @@index([status])
+  @@map("cancellation_requests")
+}
+
+model RefundPolicy {
+  id                  String   @id @default(uuid())
+  businessId          String
+  business            Business @relation(fields: [businessId], references: [id])
+  name                String // Politika adı
+  description         String? // Politika açıklaması
+  autoApproveTimeline Int? // Otomatik onay için süre (dakika)
+  timeLimit           Int? // İade talebi için süre sınırı (gün)
+  orderStatusRules    Json? // Sipariş durumlarına göre kurallar
+  productRules        Json? // Ürün kategorilerine göre kurallar
+  cancellationFees    Json? // İptal ücretleri (zaman bazlı)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([isActive])
+  @@map("refund_policies")
+}
+
+// Saved payment methods
+model SavedPaymentMethod {
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  // Payment information
+  type      PaymentMethod
+  provider  PaymentProvider
+  isDefault Boolean         @default(false)
+  nickName  String?
+
+  // Card details
+  cardBrand      CardBrand?
+  cardLast4      String?
+  cardExpMonth   Int?
+  cardExpYear    Int?
+  cardHolderName String?
+
+  // Bank account details
+  bankName         String?
+  bankAccountLast4 String?
+
+  // Provider specific
+  externalId String? // ID in Stripe, PayPal etc.
+
+  // Status and metadata
+  isActive Boolean @default(true)
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  subscriptions Subscription[]
+
+  @@index([customerId])
+  @@index([isDefault])
+  @@index([isActive])
+  @@map("saved_payment_methods")
+}
+
+// Subscription plans available in the system
+model SubscriptionPlan {
+  id              String               @id @default(uuid())
+  name            String
+  description     String?
+  price           Float // Base price
+  currency        String               @default("TRY")
+  interval        SubscriptionInterval @default(MONTHLY)
+  intervalCount   Int                  @default(1) // e.g., 1 for monthly, 3 for quarterly
+  trialPeriodDays Int? // Free trial period
+  features        Json? // Features included
+  isActive        Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  // Relations
+  subscriptions Subscription[]
+  businessId    String? // If this plan is specific to a business
+  business      Business?      @relation(fields: [businessId], references: [id])
+
+  @@index([isActive])
+  @@index([businessId])
+  @@index([interval])
+  @@map("subscription_plans")
+}
+
+// Customer subscriptions
+model Subscription {
+  id         String             @id @default(uuid())
+  customerId String
+  customer   Customer           @relation(fields: [customerId], references: [id])
+  planId     String
+  plan       SubscriptionPlan   @relation(fields: [planId], references: [id])
+  status     SubscriptionStatus @default(PENDING)
+
+  // Subscription lifecycle
+  startDate    DateTime  @default(now())
+  endDate      DateTime? // For fixed-term subscriptions
+  trialEndDate DateTime?
+  canceledAt   DateTime?
+  pausedAt     DateTime?
+  resumeAt     DateTime?
+
+  // Billing details
+  currentPeriodStart DateTime  @default(now())
+  currentPeriodEnd   DateTime
+  nextBillingDate    DateTime?
+
+  // Payment details
+  savedPaymentMethodId String?
+  savedPaymentMethod   SavedPaymentMethod? @relation(fields: [savedPaymentMethodId], references: [id])
+
+  // Subscription details
+  quantity          Int     @default(1) // For multi-quantity subscriptions
+  autoRenew         Boolean @default(true)
+  cancelAtPeriodEnd Boolean @default(false)
+
+  // Subscription metadata
+  metadata   Json? // Custom data about subscription
+  externalId String? // ID in payment processor system
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  recurringPayments RecurringPayment[]
+  businessId        String? // If this is a business subscription
+  business          Business?          @relation("BusinessSubscriptions", fields: [businessId], references: [id])
+
+  @@index([customerId])
+  @@index([planId])
+  @@index([status])
+  @@index([nextBillingDate])
+  @@index([savedPaymentMethodId])
+  @@index([businessId])
+  @@map("subscriptions")
+}
+
+// Recurring payments for subscriptions
+model RecurringPayment {
+  id             String        @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription  @relation(fields: [subscriptionId], references: [id])
+  amount         Float
+  status         PaymentStatus
+  paymentMethod  PaymentMethod
+  paymentDate    DateTime
+  dueDate        DateTime
+  description    String?
+  externalId     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("recurring_payments")
+}
+
+// Dashboard metrikleri modeli
+model DashboardMetric {
+  id          Int      @id @default(1)
+  metrics     Json
+  lastUpdated DateTime @default(now())
+
+  @@map("dashboard_metrics")
+}
+
+// Email ayarları modeli
+model EmailSettings {
+  id          Int      @id @default(1)
+  settings    Json
+  lastUpdated DateTime @default(now())
+
+  @@map("email_settings")
+}

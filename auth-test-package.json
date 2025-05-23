@@ -1,0 +1,13 @@
+{
+  "name": "auth-test",
+  "version": "1.0.0",
+  "description": "Authentication Test for Sepet Takip",
+  "main": "auth-test.js",
+  "type": "module",
+  "scripts": {
+    "test": "node auth-test.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+} 

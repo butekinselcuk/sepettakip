@@ -25,6 +25,15 @@ interface DeliveryTrend {
   percentage: number;
 }
 
+// API'den dönen veri tipi
+interface ApiTrendItem {
+  date: string;
+  total: number;
+  completed: number;
+  cancelled: number;
+  percentage: number;
+}
+
 export function TrendChart({ filters, loading = false }: TrendChartProps) {
   const [data, setData] = useState<DeliveryTrend[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
@@ -58,7 +67,7 @@ export function TrendChart({ filters, loading = false }: TrendChartProps) {
         const responseData = await response.json();
         
         // Tarih formatını düzeltme
-        const formattedData = responseData.map((item: any) => ({
+        const formattedData = responseData.map((item: ApiTrendItem) => ({
           ...item,
           date: new Date(item.date).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' })
         }));

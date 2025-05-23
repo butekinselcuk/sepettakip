@@ -14,7 +14,7 @@ interface WebSocketHook {
   isConnected: boolean;
   error: string | null;
   addMessageHandler: (handler: (message: WebSocketMessage) => void) => () => void;
-  sendMessage: (message: any) => void;
+  sendMessage: (message: WebSocketMessage) => void;
 }
 
 export function useWebSocket(url: string): WebSocketHook {
@@ -79,7 +79,7 @@ export function useWebSocket(url: string): WebSocketHook {
     };
   }, []);
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: WebSocketMessage) => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify(message));
     } else {

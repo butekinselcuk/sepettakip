@@ -1,0 +1,1 @@
+Uçtan uca test tamamlandý. Rapor: app/page-manual-check/page-manual-check.md

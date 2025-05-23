@@ -1,37 +1,58 @@
 import { NextResponse } from "next/server";
-import { verifyJwtToken } from "@/app/lib/auth";
+import { verifyJwtToken } from "@/lib/auth";
 import prisma from "@/app/lib/prisma";
+
+// Tip tanımları
+interface WeeklyStat {
+  day: string;
+  amount: number;
+}
+
+interface Payment {
+  id: number;
+  date: string;
+  amount: number;
+  status: string;
+}
+
+interface EarningsResponse {
+  totalEarnings: number;
+  pendingPayments: number;
+  weeklyStats: WeeklyStat[];
+  monthlyTotal: number;
+  deliveryCount: number;
+  bonuses: number;
+  lastPayments: Payment[];
+}
 
 export async function GET(request: Request) {
   try {
-    // JWT token'ı doğrula
-    const token = request.headers.get("authorization")?.split(" ")[1];
-    
+    // Token doğrulama işlemi
+    const token = request.headers.get('Authorization')?.split(' ')[1];
     if (!token) {
       return NextResponse.json(
-        { error: "Yetkilendirme token'ı eksik" },
+        { success: false, error: 'Yetkilendirme gerekli' },
         { status: 401 }
       );
     }
 
-    const decodedToken = await verifyJwtToken(token);
-    
-    if (!decodedToken) {
+    const decoded = await verifyJwtToken(token);
+    if (!decoded) {
       return NextResponse.json(
-        { error: "Geçersiz token" },
+        { success: false, error: 'Geçersiz token' },
         { status: 401 }
       );
     }
 
     // Kullanıcının rolünü kontrol et
-    if (decodedToken.role !== "COURIER") {
+    if (decoded.role !== "COURIER") {
       return NextResponse.json(
         { error: "Bu işlem için yetkiniz yok" },
         { status: 403 }
       );
     }
 
-    const courierId = decodedToken.userId;
+    const courierId = decoded.userId;
 
     // Kuryenin profil bilgilerini getir
     const courier = await prisma.user.findUnique({
@@ -135,30 +156,35 @@ export async function GET(request: Request) {
     // Son ödeme bilgisi
     const lastPayment = payments.length > 0 ? payments[0] : null;
 
-    // API yanıtı
-    return NextResponse.json({
-      summary: {
-        totalEarnings,
-        todayEarnings,
-        weeklyEarnings,
-        monthlyEarnings,
-        pendingPayment: totalEarnings - payments.reduce((total, payment) => total + payment.amount, 0),
-        lastPaymentDate: lastPayment ? lastPayment.createdAt : null,
-        lastPaymentAmount: lastPayment ? lastPayment.amount : 0,
-      },
-      payments: payments.map(payment => ({
+    // Örnek veri - gerçek uygulamada veritabanından çekilecek
+    const mockEarnings: EarningsResponse = {
+      totalEarnings: totalEarnings,
+      pendingPayments: totalEarnings - payments.reduce((total, payment) => total + payment.amount, 0),
+      weeklyStats: [
+        { day: 'Pazartesi', amount: weeklyEarnings },
+        { day: 'Salı', amount: weeklyEarnings },
+        { day: 'Çarşamba', amount: weeklyEarnings },
+        { day: 'Perşembe', amount: weeklyEarnings },
+        { day: 'Cuma', amount: weeklyEarnings },
+        { day: 'Cumartesi', amount: weeklyEarnings },
+        { day: 'Pazar', amount: weeklyEarnings }
+      ],
+      monthlyTotal: monthlyEarnings,
+      deliveryCount: allDeliveries.length,
+      bonuses: 0,
+      lastPayments: payments.map(payment => ({
         id: payment.id,
+        date: payment.createdAt.toISOString().split('T')[0],
         amount: payment.amount,
         status: payment.status,
-        date: payment.createdAt,
-        method: payment.method,
-        reference: payment.reference,
       })),
-    });
+    };
+
+    return NextResponse.json({ success: true, data: mockEarnings });
   } catch (error) {
-    console.error("Kurye kazanç bilgileri getirme hatası:", error);
+    console.error('Kazanç bilgileri alınamadı:', error);
     return NextResponse.json(
-      { error: "Kazanç bilgileri alınırken bir hata oluştu" },
+      { success: false, error: 'Kazanç bilgileri alınamadı' },
       { status: 500 }
     );
   }

@@ -35,11 +35,10 @@ export default function DashboardPage() {
     if (filters.onlyLate) count++;
     
     setActiveFilterCount(count);
-  }, [filters]);
+  }, [filters, setActiveFilterCount]);
 
   // Filtre değişikliklerini işle
   const handleFilterChange = (newFilters: FilterState) => {
-    console.log('Filtreler değişti:', newFilters);
     setFilters(newFilters);
     setLoading(true);
     
